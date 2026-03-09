@@ -109,6 +109,6 @@ echo "=== DONE ==="
 echo "LAN (eth0) → DHCP"
 echo "AP (${AP_IF}) → ${AP_IP}"
 
-echo "Rebooting in 5 seconds to validate persistence..."
-sleep 5
-reboot
+#echo "Rebooting in 5 seconds to validate persistence..."
+#sleep 5
+#reboot
