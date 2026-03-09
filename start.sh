@@ -6,9 +6,11 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+echo ""
 echo "====================================="
 echo "BirdDog Master Bootstrap"
 echo "====================================="
+echo ""
 
 read -p "Enter hostname (bdm-01, bdc-01, etc): " HOSTNAME_INPUT
 
