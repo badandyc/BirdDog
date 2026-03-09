@@ -1,3 +1,5 @@
+Converting this repository for all scripts to be included in golden master img
+
 BDM \
 Step 1: Bootstrap (hostname + Avahi) \
 rm -f bdm_initial_setup && \
