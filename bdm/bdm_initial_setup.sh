@@ -2,7 +2,7 @@
 set -e
 
 if [ "$EUID" -ne 0 ]; then
-  echo "Run as root: sudo bash bdm_initial_setup"
+  echo "Run as root: sudo bash /opt/birddog/bdm/bdm_initial_setup.sh"
   exit 1
 fi
 
@@ -34,9 +34,7 @@ fi
 
 hostname "$NEW_HOSTNAME"
 
-echo "Installing Avahi..."
-apt update
-apt install -y avahi-daemon
+echo "=== Resetting Avahi state ==="
 
 rm -rf /var/lib/avahi-daemon/* || true
 
@@ -57,7 +55,7 @@ fi
 
 echo "Mesh IP will be $MESH_IP"
 
-echo "Configuring systemd-networkd for mesh..."
+echo "=== Configuring mesh interface ==="
 
 mkdir -p /etc/systemd/network
 
@@ -71,10 +69,6 @@ EOF
 
 systemctl enable systemd-networkd
 systemctl restart systemd-networkd
-
-echo "Updating system..."
-#apt full-upgrade -y
-#apt autoremove -y
 
 echo "=== Bootstrap complete ==="
 echo "Hostname: $NEW_HOSTNAME"
