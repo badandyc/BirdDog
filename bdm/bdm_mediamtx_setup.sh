@@ -7,25 +7,26 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 INSTALL_DIR="/opt/birddog/mediamtx"
+BINARY="$INSTALL_DIR/mediamtx"
+CONFIG="$INSTALL_DIR/mediamtx.yml"
 
-echo "=== Verifying MediaMTX binary ==="
+echo "=== Verifying MediaMTX installation ==="
 
-if [ ! -f "$INSTALL_DIR/mediamtx" ]; then
-  echo "ERROR: MediaMTX binary not found at $INSTALL_DIR/mediamtx"
+if [ ! -f "$BINARY" ]; then
+  echo "ERROR: MediaMTX binary not found at $BINARY"
   exit 1
 fi
 
+chmod +x "$BINARY"
+
 echo "=== Creating mediamtx user ==="
-id -u mediamtx &>/dev/null || useradd -r -s /usr/sbin/nologin mediamtx
+id -u mediamtx >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin mediamtx
 
-echo "=== Writing deterministic configuration ==="
+echo "=== Writing configuration ==="
 
-cat > "$INSTALL_DIR/mediamtx.yml" <<EOF
+cat > "$CONFIG" <<EOF
 logLevel: info
 logDestinations: [stdout]
-
-###############################################
-# Authentication (open – isolated appliance)
 
 authMethod: internal
 authInternalUsers:
@@ -36,24 +37,13 @@ authInternalUsers:
       - action: read
       - action: playback
       - action: api
-      - action: metrics
-      - action: pprof
-
-###############################################
-# Control API
 
 api: true
 apiAddress: :9997
 apiAllowOrigins: ['*']
 
-###############################################
-# RTSP ingest
-
 rtsp: true
 rtspAddress: :8554
-
-###############################################
-# Disable unused protocols
 
 rtmp: false
 hls: false
@@ -62,15 +52,9 @@ metrics: false
 pprof: false
 playback: false
 
-###############################################
-# WebRTC viewers
-
 webrtc: true
 webrtcAddress: :8889
 webrtcAllowOrigins: ['*']
-
-###############################################
-# Default path behavior
 
 pathDefaults:
   source: publisher
@@ -80,20 +64,23 @@ paths:
   all_others:
 EOF
 
+echo "=== Setting ownership ==="
 chown -R mediamtx:mediamtx "$INSTALL_DIR"
 
 echo "=== Creating systemd service ==="
 
 cat > /etc/systemd/system/mediamtx.service <<EOF
 [Unit]
-Description=MediaMTX Server
+Description=BirdDog MediaMTX Server
 After=network-online.target
 Wants=network-online.target
 
 [Service]
+Type=simple
 User=mediamtx
 Group=mediamtx
-ExecStart=$INSTALL_DIR/mediamtx $INSTALL_DIR/mediamtx.yml
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$BINARY $CONFIG
 Restart=always
 RestartSec=5
 LimitNOFILE=1048576
@@ -102,12 +89,14 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 EOF
 
-echo "=== Enabling and starting service ==="
-
+echo "=== Reloading systemd ==="
 systemctl daemon-reload
+
+echo "=== Enabling service ==="
 systemctl enable mediamtx
+
+echo "=== Starting MediaMTX ==="
 systemctl restart mediamtx
 
-echo "=== DONE ==="
-
+echo "=== Service status ==="
 systemctl status mediamtx --no-pager
