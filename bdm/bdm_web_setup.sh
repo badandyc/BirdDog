@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+LOG="/opt/birddog/install_web.log"
+exec > >(tee -a "$LOG") 2>&1
+
+echo "=== BirdDog Web Setup ==="
+date
+
 if [ "$EUID" -ne 0 ]; then
   echo "Run as root: sudo bash /opt/birddog/bdm/bdm_web_setup.sh"
   exit 1
@@ -9,7 +15,7 @@ fi
 WEB_DIR="/opt/birddog/web"
 
 echo "=== Preparing web directory ==="
-mkdir -p $WEB_DIR
+mkdir -p "$WEB_DIR"
 
 echo "=== Writing nginx config ==="
 
@@ -31,7 +37,7 @@ EOF
 
 echo "=== Writing dashboard ==="
 
-cat > $WEB_DIR/index.html <<'EOF'
+cat > "$WEB_DIR/index.html" <<'EOF'
 <!DOCTYPE html>
 <html>
 <head>
@@ -137,5 +143,20 @@ echo "=== Restarting nginx ==="
 nginx -t
 systemctl restart nginx
 
+echo "=== Verification ==="
+
+echo "--- nginx status ---"
+systemctl status nginx --no-pager
+
+echo "--- nginx config test ---"
+nginx -t
+
+echo "--- web directory contents ---"
+ls -l "$WEB_DIR"
+
+echo "--- port 80 listening ---"
+ss -lntp | grep :80 || true
+
 echo "=== DONE ==="
 echo "Open: http://$(hostname).local"
+echo "Install log saved to: $LOG"
