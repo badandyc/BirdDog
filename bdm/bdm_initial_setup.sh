@@ -1,20 +1,26 @@
 #!/bin/bash
 set -e
 
+LOG="/opt/birddog/install_bdm_bootstrap.log"
+exec > >(tee -a "$LOG") 2>&1
+
+echo "=== BirdDog BDM Bootstrap ==="
+date
+
 if [ "$EUID" -ne 0 ]; then
   echo "Run as root: sudo bash /opt/birddog/bdm/bdm_initial_setup.sh"
   exit 1
 fi
 
-echo "=== BirdDog BDM Bootstrap ==="
+echo "=== Disable cloud-init if present ==="
 
-# Disable cloud-init if present
 if [ -d /etc/cloud ]; then
   echo "Disabling cloud-init..."
   touch /etc/cloud/cloud-init.disabled
 fi
 
-# Prompt for hostname
+echo "=== Prompt for hostname ==="
+
 read -p "Enter new hostname (e.g. bdm-01): " NEW_HOSTNAME
 
 if [[ -z "$NEW_HOSTNAME" ]]; then
@@ -70,10 +76,25 @@ EOF
 systemctl enable systemd-networkd
 systemctl restart systemd-networkd
 
+echo "=== Verification ==="
+
+echo "--- Hostname ---"
+hostname
+
+echo "--- Hosts file ---"
+grep 127.0.1.1 /etc/hosts
+
+echo "--- Avahi status ---"
+systemctl status avahi-daemon --no-pager
+
+echo "--- Mesh interface config ---"
+ip addr show wlan1 || true
+
+echo "--- systemd-networkd status ---"
+systemctl status systemd-networkd --no-pager
+
 echo "=== Bootstrap complete ==="
 echo "Hostname: $NEW_HOSTNAME"
 echo "Mesh IP: $MESH_IP"
 
-#echo "Rebooting in 5 seconds..."
-#sleep 5
-#reboot
+echo "Install log saved to: $LOG"
