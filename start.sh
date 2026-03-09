@@ -6,7 +6,9 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-echo "=== BirdDog Master Bootstrap ==="
+echo "====================================="
+echo "BirdDog Master Bootstrap"
+echo "====================================="
 
 read -p "Enter hostname (bdm-01, bdc-01, etc): " HOSTNAME_INPUT
 
@@ -25,22 +27,32 @@ else
 fi
 
 echo "Hostname set to $HOSTNAME_INPUT"
+echo ""
 
 echo "=== Determining node role ==="
 
 if [[ $HOSTNAME_INPUT == bdm-* ]]; then
 
   echo "Detected BDM node"
-
+  
+  echo "[1/4] Running BDM initial setup..."
   bash /opt/birddog/bdm/bdm_initial_setup.sh
+
+  echo "[2/4] Configuring Access Point..."
   bash /opt/birddog/bdm/bdm_AP_setup.sh
+
+  echo "[3/4] Configuring MediaMTX..."
   bash /opt/birddog/bdm/bdm_mediamtx_setup.sh
+
+  echo "[4/4] Installing Web Dashboard..."
   bash /opt/birddog/bdm/bdm_web_setup.sh
+
 
 elif [[ $HOSTNAME_INPUT == bdc-* ]]; then
 
   echo "Detected BDC node"
-
+  
+  echo "[1/1] Running BDC setup..."
   bash /opt/birddog/bdc/bdc_fresh_install_setup.sh
 
 else
@@ -53,4 +65,8 @@ else
 
 fi
 
-echo "=== Bootstrap complete ==="
+echo ""
+echo "====================================="
+echo "BirdDog Bootstrap Complete"
+echo "Hostname: $(hostname)"
+echo "====================================="
