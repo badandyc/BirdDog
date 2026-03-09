@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+LOG="/opt/birddog/install_mediamtx.log"
+
+exec > >(tee -a "$LOG") 2>&1
+
+echo "=== MediaMTX Setup ==="
+date
+
 if [ "$EUID" -ne 0 ]; then
   echo "Run as root: sudo bash /opt/birddog/bdm/bdm_mediamtx_setup.sh"
   exit 1
@@ -10,7 +17,7 @@ INSTALL_DIR="/opt/birddog/mediamtx"
 BINARY="$INSTALL_DIR/mediamtx"
 CONFIG="$INSTALL_DIR/mediamtx.yml"
 
-echo "=== Verifying MediaMTX installation ==="
+echo "=== Verifying MediaMTX binary ==="
 
 if [ ! -f "$BINARY" ]; then
   echo "ERROR: MediaMTX binary not found at $BINARY"
@@ -95,8 +102,18 @@ systemctl daemon-reload
 echo "=== Enabling service ==="
 systemctl enable mediamtx
 
-echo "=== Starting MediaMTX ==="
+echo "=== Starting service ==="
 systemctl restart mediamtx
 
-echo "=== Service status ==="
+echo "=== Verification ==="
+
+echo "--- Service Status ---"
 systemctl status mediamtx --no-pager
+
+echo "--- Listening Ports ---"
+ss -lntp | grep mediamtx || true
+
+echo "--- API Test ---"
+curl -s http://localhost:9997/v3/paths/list || true
+
+echo "=== Install log saved to $LOG ==="
