@@ -2,157 +2,137 @@
 set -e
 
 if [ "$EUID" -ne 0 ]; then
-    echo "Run as root: sudo bash bdc_fresh_install_setup.sh"
-    exit 1
+  echo "Run as root: sudo bash /opt/birddog/bdm/bdm_web_setup.sh"
+  exit 1
 fi
 
-echo "=== BirdDog BDC Installer ==="
+echo "=== BirdDog Web Setup ==="
 
-# Disable cloud-init if present
-if [ -d /etc/cloud ]; then
-    echo "Disabling cloud-init..."
-    touch /etc/cloud/cloud-init.disabled
-fi
+echo "=== Writing nginx config ==="
 
-echo "Updating system..."
-apt update
-apt install -y ffmpeg rpicam-apps avahi-daemon
+cat > /etc/nginx/sites-available/default <<'EOF'
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
 
-systemctl enable avahi-daemon
-systemctl start avahi-daemon
+    server_name _;
 
-# --- Hostname selection loop ---
-while true; do
-    read -p "Enter BDC hostname (e.g. bdc-01): " NEW_HOSTNAME
+    root /opt/birddog/web;
+    index index.html;
 
-    if [[ -z "$NEW_HOSTNAME" ]]; then
-        echo "Hostname cannot be empty."
-        continue
-    fi
-
-    if avahi-resolve-host-name "$NEW_HOSTNAME.local" >/dev/null 2>&1; then
-        echo "Hostname already exists on network. Choose another."
-        continue
-    fi
-
-    break
-done
-
-NODE_NUM=$(echo "$NEW_HOSTNAME" | grep -oE '[0-9]+$')
-
-if [[ -z "$NODE_NUM" ]]; then
-    echo "Hostname must end in a number (e.g. bdc-01)"
-    exit 1
-fi
-
-STREAM_NAME="cam$(printf "%02d" "$NODE_NUM")"
-
-read -p "Enter BDM hostname (without .local): " BDM_NAME
-
-if [[ -z "$BDM_NAME" ]]; then
-    echo "BDM hostname cannot be empty."
-    exit 1
-fi
-
-BDM_HOST="${BDM_NAME}.local"
-
-echo "BDC Hostname: $NEW_HOSTNAME"
-echo "Stream name: $STREAM_NAME"
-echo "BDM target: $BDM_HOST"
-
-echo "$NEW_HOSTNAME" > /etc/hostname
-
-if grep -q "^127.0.1.1" /etc/hosts; then
-    sed -i "s/^127.0.1.1.*/127.0.1.1    $NEW_HOSTNAME/" /etc/hosts
-else
-    echo "127.0.1.1    $NEW_HOSTNAME" >> /etc/hosts
-fi
-
-hostname "$NEW_HOSTNAME"
-
-systemctl restart avahi-daemon
-
-echo "=== Determining mesh IP ==="
-
-MESH_IP="10.10.20.$((NODE_NUM*10))"
-
-echo "Mesh IP will be $MESH_IP"
-
-mkdir -p /etc/systemd/network
-
-cat > /etc/systemd/network/30-mesh.network <<EOF
-[Match]
-Name=wlan1
-
-[Network]
-Address=${MESH_IP}/24
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}
 EOF
 
-systemctl enable systemd-networkd
-systemctl restart systemd-networkd
+echo "=== Installing dashboard ==="
 
-echo "Installing stream script..."
+mkdir -p /opt/birddog/web
 
-cat <<EOF > /usr/local/bin/birddog-stream.sh
-#!/bin/bash
-set -e
+cat > /opt/birddog/web/index.html <<'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>BirdDog Dashboard</title>
+<style>
+body {
+    background: #111;
+    color: white;
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 10px;
+}
+h1 {
+    margin-top: 0;
+}
+button {
+    padding: 6px 12px;
+    margin-bottom: 10px;
+}
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 10px;
+}
+.tile {
+    background: #222;
+    padding: 8px;
+    border-radius: 6px;
+}
+iframe {
+    width: 100%;
+    height: 240px;
+    border: none;
+}
+</style>
+</head>
+<body>
 
-BDM_HOST="$BDM_HOST"
-STREAM_NAME="$STREAM_NAME"
+<h1>BirdDog Live Grid</h1>
+<button onclick="loadStreams()">Refresh</button>
+<div class="grid" id="grid"></div>
 
-WIDTH=640
-HEIGHT=480
-FPS=30
+<script>
+async function loadStreams() {
 
-PIPE=/tmp/birddog_stream.h264
-rm -f \$PIPE
-mkfifo \$PIPE
+    const grid = document.getElementById("grid");
+    grid.innerHTML = "Loading...";
 
-trap "rm -f \$PIPE" EXIT
+    try {
 
-rpicam-vid -t 0 --nopreview \
---width \$WIDTH --height \$HEIGHT \
---framerate \$FPS \
---intra \$FPS --inline \
--o \$PIPE &
+        const host = window.location.hostname;
 
-sleep 1
+        const response = await fetch(`http://${host}:9997/v3/paths/list`);
+        const data = await response.json();
 
-ffmpeg -use_wallclock_as_timestamps 1 \
--f h264 -i \$PIPE \
--c:v copy \
--fflags +genpts \
--rtsp_transport tcp \
--f rtsp rtsp://\$BDM_HOST:8554/\$STREAM_NAME
+        if (!data.items || data.items.length === 0) {
+            grid.innerHTML = "No active streams.";
+            return;
+        }
+
+        grid.innerHTML = "";
+
+        data.items.forEach(item => {
+
+            if (!item.ready) return;
+
+            const tile = document.createElement("div");
+            tile.className = "tile";
+
+            const title = document.createElement("div");
+            title.innerText = item.name;
+
+            const frame = document.createElement("iframe");
+            frame.src = `http://${host}:8889/${item.name}`;
+
+            tile.appendChild(title);
+            tile.appendChild(frame);
+            grid.appendChild(tile);
+
+        });
+
+    } catch (err) {
+
+        grid.innerHTML = "Error loading streams.";
+
+    }
+
+}
+
+loadStreams();
+</script>
+
+</body>
+</html>
 EOF
 
-chmod +x /usr/local/bin/birddog-stream.sh
+echo "=== Restarting nginx ==="
 
-echo "Installing systemd service..."
+nginx -t
+systemctl restart nginx
 
-cat <<EOF > /etc/systemd/system/birddog-stream.service
-[Unit]
-Description=BirdDog Camera Stream
-After=network-online.target avahi-daemon.service
-Wants=network-online.target
-Requires=avahi-daemon.service
-
-[Service]
-Type=simple
-ExecStartPre=/bin/bash -c 'until getent hosts $BDM_HOST; do sleep 1; done'
-ExecStart=/usr/local/bin/birddog-stream.sh
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable birddog-stream.service
-
-echo "=== Installation Complete ==="
-echo "Mesh IP: $MESH_IP"
-echo "Rebooting in 5 seconds..."
-sleep 5
-reboot
+echo "=== DONE ==="
+echo "Open dashboard:"
+echo "http://$(hostname).local"
