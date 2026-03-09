@@ -74,6 +74,6 @@ echo "=== Bootstrap complete ==="
 echo "Hostname: $NEW_HOSTNAME"
 echo "Mesh IP: $MESH_IP"
 
-echo "Rebooting in 5 seconds..."
-sleep 5
-reboot
+#echo "Rebooting in 5 seconds..."
+#sleep 5
+#reboot
