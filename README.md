@@ -3,9 +3,7 @@ Converting this repository for all scripts to be included in golden master img
 Build Golden Master Image \
 rm -f golden_image_creation.sh && \
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/golden_image_creation.sh?$(date +%s)" -o golden_image_creation.sh && \
-sudo bash golden_image_creation.sh || echo "Download failed"
-
-
+sudo bash golden_image_creation.sh
 
 MISC: \
 ping <bdm-hostname>.local \
