@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+LOG="/opt/birddog/install_ap.log"
+exec > >(tee -a "$LOG") 2>&1
+
+echo "=== BirdDog AP Setup ==="
+date
+
 if [ "$EUID" -ne 0 ]; then
   echo "Run as root: sudo bash /opt/birddog/bdm/bdm_AP_setup.sh"
   exit 1
@@ -105,10 +111,24 @@ systemctl restart systemd-networkd
 systemctl restart hostapd
 systemctl restart dnsmasq
 
+echo "=== Verification ==="
+
+echo "--- Interface status ---"
+ip addr show ${AP_IF}
+
+echo "--- hostapd status ---"
+systemctl status hostapd --no-pager
+
+echo "--- dnsmasq status ---"
+systemctl status dnsmasq --no-pager
+
+echo "--- Listening DHCP port ---"
+ss -lntup | grep 67 || true
+
+echo "--- WiFi interface info ---"
+iw dev ${AP_IF} info || true
+
 echo "=== DONE ==="
 echo "LAN (eth0) → DHCP"
 echo "AP (${AP_IF}) → ${AP_IP}"
-
-#echo "Rebooting in 5 seconds to validate persistence..."
-#sleep 5
-#reboot
+echo "Install log saved to: $LOG"
