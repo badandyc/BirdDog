@@ -2,7 +2,7 @@
 set -e
 
 if [ "$EUID" -ne 0 ]; then
-  echo "Run as root: sudo bash bdm_AP_setup.sh"
+  echo "Run as root: sudo bash /opt/birddog/bdm/bdm_AP_setup.sh"
   exit 1
 fi
 
@@ -16,10 +16,6 @@ rfkill unblock wifi || true
 
 echo "=== Set regulatory domain ==="
 iw reg set US || true
-
-echo "=== Installing required packages ==="
-apt update
-apt install -y hostapd dnsmasq
 
 echo "=== Disable NetworkManager (appliance mode) ==="
 systemctl stop NetworkManager 2>/dev/null || true
@@ -75,6 +71,7 @@ systemctl enable hostapd
 
 echo "=== Configure hostapd startup ordering ==="
 mkdir -p /etc/systemd/system/hostapd.service.d
+
 cat > /etc/systemd/system/hostapd.service.d/override.conf <<EOF
 [Unit]
 After=systemd-networkd.service
@@ -111,6 +108,7 @@ systemctl restart dnsmasq
 echo "=== DONE ==="
 echo "LAN (eth0) → DHCP"
 echo "AP (${AP_IF}) → ${AP_IP}"
+
 echo "Rebooting in 5 seconds to validate persistence..."
 sleep 5
 reboot
