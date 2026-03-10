@@ -13,4 +13,5 @@ ssh-keygen -R x.x.x.x \
 rpicam-vid -t 5000 -o test.h264 \
 iw dev wlan1 info \
 iw dev wlan1 station dump \
-ip addr show wlan1
+ip addr show wlan1 \
+sudo nmcli device wifi connect "SSID_NAME" password "PASSWORD" ifname wlan0
