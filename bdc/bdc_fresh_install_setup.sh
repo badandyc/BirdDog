@@ -4,11 +4,13 @@ set -e
 LOG="/opt/birddog/install_bdc.log"
 exec > >(tee -a "$LOG") 2>&1
 
-echo "=== BirdDog BDC Installer ==="
+echo "================================="
+echo "BirdDog BDC Installer"
+echo "================================="
 date
 
 if [ "$EUID" -ne 0 ]; then
-    echo "Run as root: sudo bash /opt/birddog/start.sh"
+    echo "Run as root: sudo bash /opt/birddog/common/start.sh"
     exit 1
 fi
 
@@ -21,15 +23,6 @@ fi
 
 echo "BDC hostname received: $NEW_HOSTNAME"
 
-if [ -d /etc/cloud ]; then
-    echo "Disabling cloud-init..."
-    touch /etc/cloud/cloud-init.disabled
-fi
-
-echo "=== Enabling Avahi ==="
-systemctl enable avahi-daemon
-systemctl start avahi-daemon
-
 NODE_NUM=$(echo "$NEW_HOSTNAME" | grep -oE '[0-9]+$')
 
 if [[ -z "$NODE_NUM" ]]; then
@@ -37,17 +30,38 @@ if [[ -z "$NODE_NUM" ]]; then
     exit 1
 fi
 
+
+echo ""
+echo "=== System Preparation ==="
+
+if [ -d /etc/cloud ]; then
+    echo "Disabling cloud-init..."
+    touch /etc/cloud/cloud-init.disabled
+fi
+
+echo "Enabling Avahi service..."
+systemctl enable avahi-daemon
+systemctl start avahi-daemon
+
+
+echo ""
+echo "=== Node Configuration ==="
+
 STREAM_NAME="cam$(printf "%02d" "$NODE_NUM")"
+
+echo "Camera stream name: $STREAM_NAME"
 
 read -p "Enter BDM hostname (without .local): " BDM_NAME
 
 BDM_HOST="${BDM_NAME}.local"
 
+echo "BDM hostname set to: $BDM_HOST"
 
+
+echo ""
 echo "=== Camera Verification Test ==="
 
 TEST_FILE="/opt/birddog/test_capture.h264"
-
 rm -f "$TEST_FILE"
 
 echo "Capturing 5 second camera test..."
@@ -73,7 +87,8 @@ else
 fi
 
 
-echo "Installing stream script..."
+echo ""
+echo "=== Installing Stream Script ==="
 
 cat <<EOF > /usr/local/bin/birddog-stream.sh
 #!/bin/bash
@@ -92,6 +107,8 @@ mkfifo \$PIPE
 
 trap "rm -f \$PIPE" EXIT
 
+echo "Starting camera capture..."
+
 rpicam-vid -t 0 --nopreview \
 --width \$WIDTH --height \$HEIGHT \
 --framerate \$FPS \
@@ -100,7 +117,10 @@ rpicam-vid -t 0 --nopreview \
 
 sleep 1
 
-ffmpeg -use_wallclock_as_timestamps 1 \
+echo "Starting RTSP stream to \$BDM_HOST..."
+
+ffmpeg \
+-use_wallclock_as_timestamps 1 \
 -f h264 -i \$PIPE \
 -c:v copy \
 -fflags +genpts \
@@ -110,6 +130,9 @@ EOF
 
 chmod +x /usr/local/bin/birddog-stream.sh
 
+
+echo ""
+echo "=== Creating Stream Service ==="
 
 cat <<EOF > /etc/systemd/system/birddog-stream.service
 [Unit]
@@ -129,9 +152,18 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
+
 systemctl daemon-reload
 systemctl enable birddog-stream.service
 
-echo "=== BDC Installation Complete ==="
+
+echo ""
+echo "================================="
+echo "BirdDog BDC Installation Complete"
 echo "Node: $NEW_HOSTNAME"
-echo "Install log saved to: $LOG"
+echo "Stream: rtsp://$BDM_HOST:8554/$STREAM_NAME"
+echo "================================="
+echo ""
+echo "Install log saved to:"
+echo "$LOG"
+echo ""
