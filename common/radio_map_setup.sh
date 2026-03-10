@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+mkdir -p /opt/birddog/radio
+
 LOG="/opt/birddog/radio/radio_map.log"
 exec > >(tee -a "$LOG") 2>&1
 
@@ -24,6 +26,8 @@ echo "Detected wireless interfaces:"
 echo "$INTERFACES"
 echo ""
 
+declare -A TARGET_MAP
+
 for IF in $INTERFACES
 do
 
@@ -42,17 +46,35 @@ do
         TARGET="wlan2"
     fi
 
-    echo "Mapping → $TARGET"
+    echo "Mapping target → $TARGET"
 
-    if [[ "$IF" != "$TARGET" ]]; then
-        ip link set $IF down
-        ip link set $IF name $TARGET
-    fi
+    TARGET_MAP[$IF]=$TARGET
 
     echo ""
 
 done
 
+
+echo "================================="
+echo "Applying interface mapping"
+echo "================================="
+
+# Step 1: rename everything to temp names to avoid collisions
+for IF in "${!TARGET_MAP[@]}"
+do
+    ip link set $IF down
+    ip link set $IF name temp_$IF
+done
+
+# Step 2: rename temp names to targets
+for IF in "${!TARGET_MAP[@]}"
+do
+    TARGET=${TARGET_MAP[$IF]}
+    ip link set temp_$IF name $TARGET
+done
+
+
+echo ""
 echo "================================="
 echo "Final Radio Layout"
 echo "================================="
