@@ -79,7 +79,7 @@ echo "[7/12] Mesh scripts complete."
 
 echo "[8/12] Downloading common scripts..."
 
-curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/start.sh?$(date +%s)" -o common/start.sh
+curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/device_configure.sh?$(date +%s)" -o common/start.sh
 echo " - start.sh downloaded"
 
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/radio_map_setup.sh?$(date +%s)" -o common/radio_map_setup.sh
@@ -90,7 +90,7 @@ echo "[8/12] Common scripts complete."
 
 echo "[9/12] Setting executable permissions..."
 
-sudo chmod +x /opt/birddog/common/start.sh
+sudo chmod +x /opt/birddog/common/device_configure.sh
 sudo chmod +x /opt/birddog/common/*.sh
 sudo chmod +x /opt/birddog/bdm/*.sh
 sudo chmod +x /opt/birddog/bdc/*.sh
@@ -141,29 +141,29 @@ echo "====================================="
 
 
 echo ""
-echo "[12/12] Launch BirdDog setup?"
+echo "[12/12] Launch BirdDog Device_Configure?"
 echo ""
 
-read -p "Start setup now (run start.sh)? [Y/N]: " START_NOW
+read -p "Start setup now (run device_configure.sh)? [Y/N]: " START_NOW
 
 case "$START_NOW" in
     [Yy]* )
         echo ""
         echo "Launching BirdDog setup..."
         echo ""
-        sudo /opt/birddog/common/start.sh
+        sudo /opt/birddog/common/device_configure.sh
         ;;
     [Nn]* )
         echo ""
         echo "Setup skipped."
         echo ""
         echo "You can run it later with:"
-        echo "sudo /opt/birddog/common/start.sh"
+        echo "sudo /opt/birddog/common/device_configure.sh"
         ;;
     * )
         echo ""
         echo "Invalid response. Exiting without running setup."
         echo "Run manually with:"
-        echo "sudo /opt/birddog/common/start.sh"
+        echo "sudo /opt/birddog/common/device_configure.sh"
         ;;
 esac
