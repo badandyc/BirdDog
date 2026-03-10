@@ -57,8 +57,11 @@ elif [[ $HOSTNAME_INPUT == bdc-* ]]; then
 
   echo "Detected BDC node"
   
-  echo "[1/1] Running BDC setup..."
+  echo "[1/2] Running BDC setup..."
   bash /opt/birddog/bdc/bdc_fresh_install_setup.sh "$HOSTNAME_INPUT"
+
+  echo "[2/2] Configuring Mesh Network..."
+  bash /opt/birddog/add_mesh_network.sh "$HOSTNAME_INPUT"
 
 else
 
