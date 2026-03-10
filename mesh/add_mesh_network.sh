@@ -10,7 +10,6 @@ exec > >(tee -a "$LOG") 2>&1
 echo "====================================="
 echo "BirdDog Mesh Network Setup"
 echo "Install started: $(date)"
-echo "Log file: $LOG"
 echo "====================================="
 
 HOSTNAME_INPUT="$1"
@@ -38,7 +37,7 @@ echo ""
 
 read -p "Press ENTER when adapter is inserted..."
 
-echo "Waiting for wlan1 interface..."
+echo "Waiting for wlan1..."
 
 until ip link show wlan1 >/dev/null 2>&1; do
   echo "wlan1 not detected yet..."
@@ -54,6 +53,23 @@ iw dev wlan1 info || true
 MESH_IP="10.10.20.$((NODE_NUM*10))"
 
 echo "Calculated mesh IP: $MESH_IP"
+
+echo ""
+echo "Configuring network managers to ignore wlan1..."
+
+# Prevent dhcpcd from touching wlan1
+if ! grep -q "denyinterfaces wlan1" /etc/dhcpcd.conf; then
+  echo "denyinterfaces wlan1" >> /etc/dhcpcd.conf
+  echo "Added wlan1 to dhcpcd deny list"
+fi
+
+systemctl restart dhcpcd || true
+
+# Disable wpa_supplicant for wlan1
+systemctl stop wpa_supplicant@wlan1 2>/dev/null || true
+systemctl disable wpa_supplicant@wlan1 2>/dev/null || true
+
+echo "wpa_supplicant disabled for wlan1"
 
 echo ""
 echo "Creating mesh runtime script..."
@@ -97,11 +113,11 @@ ip link set wlan1 up
 
 sleep 2
 
-echo "Joining mesh network..."
+echo "Joining mesh..."
 iw dev wlan1 mesh join birddog-mesh
 
 echo "Assigning IP $MESH_IP"
-ip addr add $MESH_IP/24 dev wlan1 || true
+ip addr add $MESH_IP/24 dev wlan1 2>/dev/null || true
 
 echo "Final interface state:"
 iw dev wlan1 info
@@ -115,11 +131,10 @@ EOF
 
 chmod +x /usr/local/bin/birddog-mesh-join.sh
 
-echo "Mesh runtime script installed:"
-ls -l /usr/local/bin/birddog-mesh-join.sh
+echo "Mesh runtime script installed."
 
 echo ""
-echo "Creating systemd service..."
+echo "Creating mesh systemd service..."
 
 cat > /etc/systemd/system/birddog-mesh.service <<EOF
 [Unit]
@@ -135,10 +150,6 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 
-echo "Service file created:"
-cat /etc/systemd/system/birddog-mesh.service
-
-echo ""
 echo "Reloading systemd..."
 
 systemctl daemon-reload
@@ -149,7 +160,7 @@ systemctl enable birddog-mesh
 
 echo "Restarting mesh service..."
 
-systemctl restart birddog-mesh || true
+systemctl restart birddog-mesh
 
 echo ""
 echo "Service status:"
@@ -159,7 +170,6 @@ echo ""
 echo "====================================="
 echo "Mesh network install complete"
 echo "Node: $HOSTNAME_INPUT"
-echo "Interface: wlan1"
 echo "Mesh IP: $MESH_IP"
 echo ""
 echo "Install log: /opt/birddog/mesh/mesh_install.log"
@@ -172,4 +182,4 @@ echo "iw dev wlan1 station dump"
 echo "ping 10.10.20.X"
 
 echo ""
-echo "Reboot when ready to test persistence."
+echo "Reboot to verify persistence."
