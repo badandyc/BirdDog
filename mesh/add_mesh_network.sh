@@ -59,7 +59,6 @@ echo "Configuring network managers to ignore wlan1..."
 
 if ! grep -q "denyinterfaces wlan1" /etc/dhcpcd.conf; then
   echo "denyinterfaces wlan1" >> /etc/dhcpcd.conf
-  echo "Added wlan1 to dhcpcd deny list"
 fi
 
 systemctl restart dhcpcd || true
@@ -119,7 +118,7 @@ ip addr add $MESH_IP/24 dev wlan1 2>/dev/null || true
 echo "Mesh interface ready"
 
 #################################################
-# MESH SELF-HEAL LOOP
+# MESH SELF HEAL LOOP
 #################################################
 
 while true
@@ -145,8 +144,6 @@ EOF
 
 chmod +x /usr/local/bin/birddog-mesh-join.sh
 
-echo "Mesh runtime script installed."
-
 echo ""
 echo "Creating mesh systemd service..."
 
@@ -165,30 +162,19 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-echo "Reloading systemd..."
-
 systemctl daemon-reload
-
-echo "Enabling mesh service..."
-
 systemctl enable birddog-mesh
-
-echo "Restarting mesh service..."
-
 systemctl restart birddog-mesh
 
 echo ""
-echo "Installing BirdDog mesh status command..."
+echo "Installing BirdDog mesh operator command..."
 
 cat > /usr/local/bin/mesh <<'EOF'
 #!/bin/bash
 
 CMD="$1"
 
-if [[ "$CMD" != "status" ]]; then
-    echo "Usage: mesh status"
-    exit 1
-fi
+if [[ "$CMD" == "status" ]]; then
 
 echo "================================="
 echo "BirdDog Mesh Status"
@@ -197,8 +183,7 @@ echo "Time: $(date)"
 echo "================================="
 
 if ! ip link show wlan1 >/dev/null 2>&1; then
-    echo ""
-    echo "Mesh interface wlan1 not present."
+    echo "Mesh interface wlan1 not present"
     exit 0
 fi
 
@@ -228,6 +213,35 @@ echo "Link State:"
 iw dev wlan1 station dump | grep plink
 
 echo "================================="
+exit 0
+fi
+
+
+if [[ "$CMD" == "peers" ]]; then
+
+echo "================================="
+echo "BirdDog Mesh Peer Details"
+echo "Node: $(hostname)"
+echo "================================="
+
+iw dev wlan1 station dump | awk '
+/Station/ {printf "\nPeer: %s\n",$2}
+/signal:/ {print "Signal:",$2,"dBm"}
+/tx bitrate:/ {print "TX Rate:",$3,$4}
+/expected throughput:/ {print "Expected Throughput:",$3}
+/mesh airtime link metric:/ {print "Link Metric:",$5}
+/connected time:/ {print "Connected:",$3,"seconds"}
+'
+
+echo ""
+echo "================================="
+exit 0
+fi
+
+echo "Usage:"
+echo "mesh status"
+echo "mesh peers"
+
 EOF
 
 chmod +x /usr/local/bin/mesh
@@ -243,8 +257,13 @@ echo "Runtime log: /opt/birddog/mesh/mesh_runtime.log"
 echo "====================================="
 
 echo ""
+echo "Commands available:"
+echo "mesh status"
+echo "mesh peers"
+echo ""
 echo "Verify mesh with:"
 echo "mesh status"
+echo "mesh peers"
 echo "ping 10.10.20.X"
 
 echo ""
