@@ -5,7 +5,7 @@ echo "=== BirdDog Golden Image Creation ==="
 
 echo "[1/11] Installing required packages (if missing)..."
 
-sudo apt update
+#sudo apt update
 
 for pkg in ffmpeg rpicam-apps avahi-daemon nginx hostapd dnsmasq git; do
     if dpkg -s "$pkg" >/dev/null 2>&1; then
