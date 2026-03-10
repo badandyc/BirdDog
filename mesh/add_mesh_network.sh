@@ -35,18 +35,6 @@ done
 
 echo "Mesh adapter detected."
 
-echo "Configuring mesh interface..."
-
-ip link set wlan1 down || true
-iw dev wlan1 set type mp || true
-ip link set wlan1 up || true
-
-echo "Joining mesh network..."
-
-iw dev wlan1 mesh join birddog-mesh || true
-
-echo "Mesh joined."
-
 MESH_IP="10.10.20.$((NODE_NUM*10))"
 
 echo "Mesh IP will be $MESH_IP"
@@ -65,7 +53,25 @@ EOF
 systemctl enable systemd-networkd
 systemctl restart systemd-networkd
 
-echo "Installing persistent mesh service..."
+echo "Installing mesh join script..."
+
+cat > /usr/local/bin/birddog-mesh-join.sh <<'EOF'
+#!/bin/bash
+set -e
+
+until ip link show wlan1 >/dev/null 2>&1; do
+    sleep 1
+done
+
+ip link set wlan1 down || true
+iw dev wlan1 set type mp || true
+ip link set wlan1 up || true
+iw dev wlan1 mesh join birddog-mesh || true
+EOF
+
+chmod +x /usr/local/bin/birddog-mesh-join.sh
+
+echo "Installing mesh systemd service..."
 
 cat > /etc/systemd/system/birddog-mesh.service <<EOF
 [Unit]
@@ -75,13 +81,7 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStartPre=/bin/bash -c 'until ip link show wlan1 >/dev/null 2>&1; do sleep 1; done'
-ExecStart=/bin/bash -c '
-ip link set wlan1 down || true
-iw dev wlan1 set type mp || true
-ip link set wlan1 up || true
-iw dev wlan1 mesh join birddog-mesh || true
-'
+ExecStart=/usr/local/bin/birddog-mesh-join.sh
 RemainAfterExit=yes
 
 [Install]
@@ -101,7 +101,7 @@ echo "Mesh ID: birddog-mesh"
 echo "====================================="
 
 echo "Mesh will automatically start at boot."
-echo "You can verify peers with:"
+echo "Verify peers with:"
 echo "iw dev wlan1 station dump"
 
 echo ""
