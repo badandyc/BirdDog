@@ -12,18 +12,15 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Hostname passed from start.sh
 NEW_HOSTNAME="$1"
 
 if [[ -z "$NEW_HOSTNAME" ]]; then
     echo "Error: hostname not provided."
-    echo "Run via: sudo bash /opt/birddog/start.sh"
     exit 1
 fi
 
 echo "BDC hostname received: $NEW_HOSTNAME"
 
-# Disable cloud-init if present
 if [ -d /etc/cloud ]; then
     echo "Disabling cloud-init..."
     touch /etc/cloud/cloud-init.disabled
@@ -32,11 +29,6 @@ fi
 echo "=== Enabling Avahi ==="
 systemctl enable avahi-daemon
 systemctl start avahi-daemon
-
-# Verify hostname is not already on network
-if avahi-resolve-host-name "$NEW_HOSTNAME.local" >/dev/null 2>&1; then
-    echo "Warning: hostname already detected on network."
-fi
 
 NODE_NUM=$(echo "$NEW_HOSTNAME" | grep -oE '[0-9]+$')
 
@@ -49,53 +41,7 @@ STREAM_NAME="cam$(printf "%02d" "$NODE_NUM")"
 
 read -p "Enter BDM hostname (without .local): " BDM_NAME
 
-if [[ -z "$BDM_NAME" ]]; then
-    echo "BDM hostname cannot be empty."
-    exit 1
-fi
-
 BDM_HOST="${BDM_NAME}.local"
-
-echo "BDC Hostname: $NEW_HOSTNAME"
-echo "Stream name: $STREAM_NAME"
-echo "BDM target: $BDM_HOST"
-
-systemctl restart avahi-daemon
-
-echo ""
-echo "====================================="
-echo "Plug in the USB mesh WiFi adapter now."
-echo "It should appear as interface: wlan1"
-echo "====================================="
-read -p "Press ENTER to continue..."
-
-echo "Waiting for mesh adapter (wlan1)..."
-
-until ip link show wlan1 >/dev/null 2>&1; do
-    echo "Mesh adapter not detected yet..."
-    sleep 2
-done
-
-echo "Mesh adapter detected."
-
-echo "=== Determining mesh IP ==="
-
-MESH_IP="10.10.20.$((NODE_NUM*10))"
-
-echo "Mesh IP will be $MESH_IP"
-
-mkdir -p /etc/systemd/network
-
-cat > /etc/systemd/network/30-mesh.network <<EOF
-[Match]
-Name=wlan1
-
-[Network]
-Address=${MESH_IP}/24
-EOF
-
-systemctl enable systemd-networkd
-systemctl restart systemd-networkd
 
 echo "Installing stream script..."
 
@@ -134,8 +80,6 @@ EOF
 
 chmod +x /usr/local/bin/birddog-stream.sh
 
-echo "Installing systemd service..."
-
 cat <<EOF > /etc/systemd/system/birddog-stream.service
 [Unit]
 Description=BirdDog Camera Stream
@@ -157,21 +101,5 @@ EOF
 systemctl daemon-reload
 systemctl enable birddog-stream.service
 
-echo "=== Verification ==="
-
-echo "--- Hostname ---"
-hostname
-
-echo "--- Mesh interface ---"
-ip addr show wlan1 || true
-
-echo "--- Stream service status ---"
-systemctl status birddog-stream.service --no-pager || true
-
-echo "=== Installation Complete ==="
-echo "Mesh IP: $MESH_IP"
+echo "=== BDC Installation Complete ==="
 echo "Install log saved to: $LOG"
-
-echo "Rebooting in 5 seconds..."
-sleep 5
-reboot
