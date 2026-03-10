@@ -62,6 +62,22 @@ echo "BDM target: $BDM_HOST"
 
 systemctl restart avahi-daemon
 
+echo ""
+echo "====================================="
+echo "Plug in the USB mesh WiFi adapter now."
+echo "It should appear as interface: wlan1"
+echo "====================================="
+read -p "Press ENTER to continue..."
+
+echo "Waiting for mesh adapter (wlan1)..."
+
+until ip link show wlan1 >/dev/null 2>&1; do
+    echo "Mesh adapter not detected yet..."
+    sleep 2
+done
+
+echo "Mesh adapter detected."
+
 echo "=== Determining mesh IP ==="
 
 MESH_IP="10.10.20.$((NODE_NUM*10))"
