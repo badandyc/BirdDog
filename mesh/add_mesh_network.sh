@@ -14,16 +14,12 @@ echo "====================================="
 
 HOSTNAME_INPUT="$1"
 
-echo "Hostname argument: $HOSTNAME_INPUT"
-
 if [[ -z "$HOSTNAME_INPUT" ]]; then
   echo "ERROR: Hostname not provided"
   exit 1
 fi
 
 NODE_NUM=$(echo "$HOSTNAME_INPUT" | grep -oE '[0-9]+$')
-
-echo "Parsed node number: $NODE_NUM"
 
 if [[ -z "$NODE_NUM" ]]; then
   echo "ERROR: Hostname must end in number"
@@ -46,13 +42,9 @@ done
 
 echo "wlan1 detected"
 
-echo "Current interface state:"
-ip addr show wlan1 || true
-iw dev wlan1 info || true
-
 MESH_IP="10.10.20.$((NODE_NUM*10))"
 
-echo "Calculated mesh IP: $MESH_IP"
+echo "Mesh IP: $MESH_IP"
 
 echo ""
 echo "Preventing network managers from touching wlan1..."
@@ -66,10 +58,8 @@ systemctl restart dhcpcd || true
 systemctl stop wpa_supplicant@wlan1 2>/dev/null || true
 systemctl disable wpa_supplicant@wlan1 2>/dev/null || true
 
-echo "wpa_supplicant disabled for wlan1"
-
 echo ""
-echo "Creating mesh runtime script..."
+echo "Creating mesh runtime service..."
 
 cat > /usr/local/bin/birddog-mesh-join.sh <<EOF
 #!/bin/bash
@@ -83,73 +73,52 @@ echo "================================="
 echo "Mesh runtime start \$(date)"
 echo "Hostname: \$(hostname)"
 
-echo "Waiting for USB WiFi initialization..."
 sleep 10
-
-echo "Waiting for wlan1..."
 
 until ip link show wlan1 >/dev/null 2>&1; do
     sleep 2
 done
 
-echo "Interface detected"
+echo "Configuring mesh interface..."
 
-echo "Initial interface state:"
-ip addr show wlan1
-iw dev wlan1 info
-
-echo "Resetting interface..."
 ip link set wlan1 down || true
-
-echo "Setting mesh mode..."
 iw dev wlan1 set type mp
-
-echo "Bringing interface up..."
 ip link set wlan1 up
 
 sleep 2
 
-echo "Joining mesh..."
 iw dev wlan1 mesh join birddog-mesh
 
-echo "Assigning IP $MESH_IP"
 ip addr add $MESH_IP/24 dev wlan1 2>/dev/null || true
 
-echo "Mesh interface ready"
+echo "Mesh joined"
 
-############################################
+################################################
 # SELF HEAL LOOP
-############################################
+################################################
 
 while true
 do
 
-    PEERS=\$(iw dev wlan1 station dump | grep Station | wc -l)
+PEERS=\$(iw dev wlan1 station dump | grep Station | wc -l)
 
-    echo "Peer count: \$PEERS"
+if [ "\$PEERS" -eq 0 ]; then
 
-    if [ "\$PEERS" -eq 0 ]; then
+echo "No peers detected — rejoining mesh"
 
-        echo "No mesh peers detected — attempting rejoin..."
+iw dev wlan1 mesh leave || true
+sleep 2
+iw dev wlan1 mesh join birddog-mesh || true
 
-        iw dev wlan1 mesh leave || true
-        sleep 2
-        iw dev wlan1 mesh join birddog-mesh || true
+fi
 
-        echo "Rejoin attempted"
-
-    fi
-
-    sleep 30
+sleep 30
 
 done
 
 EOF
 
 chmod +x /usr/local/bin/birddog-mesh-join.sh
-
-echo ""
-echo "Creating mesh systemd service..."
 
 cat > /etc/systemd/system/birddog-mesh.service <<EOF
 [Unit]
@@ -178,6 +147,28 @@ cat > /usr/local/bin/mesh <<'EOF'
 
 CMD="$1"
 
+resolve_mac() {
+
+MAC="$1"
+
+IP=$(ip neigh | grep "$MAC" | awk '{print $1}')
+
+if [[ -n "$IP" ]]; then
+    HOST=$(getent hosts "$IP" | awk '{print $2}' | cut -d'.' -f1)
+    if [[ -n "$HOST" ]]; then
+        echo "$HOST"
+        return
+    fi
+fi
+
+echo "$MAC"
+
+}
+
+###################################
+# STATUS
+###################################
+
 if [[ "$CMD" == "status" ]]; then
 
 echo "================================="
@@ -186,13 +177,6 @@ echo "Node: $(hostname)"
 echo "Time: $(date)"
 echo "================================="
 
-if ! ip link show wlan1 >/dev/null 2>&1; then
-    echo "Mesh interface wlan1 not present"
-    exit 0
-fi
-
-echo ""
-echo "Interface Type:"
 iw dev wlan1 info | grep type
 
 echo ""
@@ -205,14 +189,17 @@ PEERS=$(iw dev wlan1 station dump | grep Station | wc -l)
 echo "$PEERS peers"
 
 echo ""
-echo "Link State:"
+echo "Links:"
 iw dev wlan1 station dump | grep plink
 
 echo "================================="
 
-exit 0
+exit
 fi
 
+###################################
+# PEERS
+###################################
 
 if [[ "$CMD" == "peers" ]]; then
 
@@ -220,46 +207,109 @@ echo "================================="
 echo "BirdDog Mesh Peer Details"
 echo "================================="
 
-iw dev wlan1 station dump | awk '
-/Station/ {printf "\nPeer: %s\n",$2}
-/signal:/ {print "Signal:",$2,"dBm"}
-/tx bitrate:/ {print "TX Rate:",$3,$4}
-/expected throughput:/ {print "Expected Throughput:",$3}
-/mesh airtime link metric:/ {print "Link Metric:",$5}
-/connected time:/ {print "Connected:",$3,"seconds"}
-'
+iw dev wlan1 station dump | while read line
+do
+
+if [[ $line == Station* ]]; then
+
+MAC=$(echo $line | awk '{print $2}')
+NAME=$(resolve_mac "$MAC")
+
+echo ""
+echo "Peer: $NAME"
+
+fi
+
+if [[ $line == *signal:* ]]; then
+echo "Signal:" $(echo $line | awk '{print $2}') "dBm"
+fi
+
+if [[ $line == *tx\ bitrate:* ]]; then
+echo "TX Rate:" $(echo $line | awk '{print $3,$4}')
+fi
+
+if [[ $line == *expected\ throughput:* ]]; then
+echo "Throughput:" $(echo $line | awk '{print $3}')
+fi
+
+if [[ $line == *airtime*metric:* ]]; then
+echo "Link Metric:" $(echo $line | awk '{print $5}')
+fi
+
+if [[ $line == *connected\ time:* ]]; then
+echo "Connected:" $(echo $line | awk '{print $3}') "seconds"
+fi
+
+done
 
 echo ""
 echo "================================="
 
-exit 0
+exit
 fi
 
+###################################
+# MAP
+###################################
 
 if [[ "$CMD" == "map" ]]; then
 
-echo "================================="
-echo "BirdDog Mesh Topology"
-echo "Node: $(hostname)"
-echo "================================="
-
 LOCAL=$(hostname)
 
-iw dev wlan1 station dump | awk -v node="$LOCAL" '
-/Station/ {printf "%s  <---->  %s\n", node, $2}
-'
-
-echo ""
+echo "================================="
+echo "BirdDog Mesh Topology"
 echo "================================="
 
-exit 0
+iw dev wlan1 station dump | awk '/Station/ {print $2}' | while read MAC
+do
+
+NAME=$(resolve_mac "$MAC")
+
+echo "$LOCAL  <---->  $NAME"
+
+done
+
+echo "================================="
+
+exit
 fi
 
+###################################
+# SCAN
+###################################
+
+if [[ "$CMD" == "scan" ]]; then
+
+echo "================================="
+echo "BirdDog Mesh Node Scan"
+echo "================================="
+
+ip neigh show dev wlan1 | while read line
+do
+
+IP=$(echo $line | awk '{print $1}')
+MAC=$(echo $line | awk '{print $5}')
+
+HOST=$(getent hosts "$IP" | awk '{print $2}' | cut -d'.' -f1)
+
+if [[ -z "$HOST" ]]; then
+HOST="$MAC"
+fi
+
+echo "$HOST  ($IP)"
+
+done
+
+echo "================================="
+
+exit
+fi
 
 echo "Usage:"
 echo "mesh status"
 echo "mesh peers"
 echo "mesh map"
+echo "mesh scan"
 
 EOF
 
@@ -271,22 +321,9 @@ echo "Mesh network install complete"
 echo "Node: $HOSTNAME_INPUT"
 echo "Mesh IP: $MESH_IP"
 echo ""
-echo "Install log: /opt/birddog/mesh/mesh_install.log"
-echo "Runtime log: /opt/birddog/mesh/mesh_runtime.log"
+echo "Commands:"
+echo "mesh status"
+echo "mesh peers"
+echo "mesh map"
+echo "mesh scan"
 echo "====================================="
-
-echo ""
-echo "Commands installed:"
-echo "mesh status"
-echo "mesh peers"
-echo "mesh map"
-
-echo ""
-echo "Verify mesh with:"
-echo "mesh status"
-echo "mesh peers"
-echo "mesh map"
-echo "ping 10.10.20.X"
-
-echo ""
-echo "Reboot to verify persistence."
