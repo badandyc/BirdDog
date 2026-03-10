@@ -50,7 +50,7 @@ if [[ $HOSTNAME_INPUT == bdm-* ]]; then
   bash /opt/birddog/bdm/bdm_web_setup.sh "$HOSTNAME_INPUT"
 
   echo "[5/5] Configuring Mesh Network..."
-  bash /opt/birddog/add_mesh_network.sh "$HOSTNAME_INPUT"
+  bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
 
 
 elif [[ $HOSTNAME_INPUT == bdc-* ]]; then
@@ -61,7 +61,7 @@ elif [[ $HOSTNAME_INPUT == bdc-* ]]; then
   bash /opt/birddog/bdc/bdc_fresh_install_setup.sh "$HOSTNAME_INPUT"
 
   echo "[2/2] Configuring Mesh Network..."
-  bash /opt/birddog/add_mesh_network.sh "$HOSTNAME_INPUT"
+  bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
 
 else
 
