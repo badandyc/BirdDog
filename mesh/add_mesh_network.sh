@@ -57,7 +57,6 @@ echo "Calculated mesh IP: $MESH_IP"
 echo ""
 echo "Configuring network managers to ignore wlan1..."
 
-# Prevent dhcpcd from touching wlan1
 if ! grep -q "denyinterfaces wlan1" /etc/dhcpcd.conf; then
   echo "denyinterfaces wlan1" >> /etc/dhcpcd.conf
   echo "Added wlan1 to dhcpcd deny list"
@@ -65,7 +64,6 @@ fi
 
 systemctl restart dhcpcd || true
 
-# Disable wpa_supplicant for wlan1
 systemctl stop wpa_supplicant@wlan1 2>/dev/null || true
 systemctl disable wpa_supplicant@wlan1 2>/dev/null || true
 
@@ -167,6 +165,57 @@ echo "Service status:"
 systemctl status birddog-mesh || true
 
 echo ""
+echo "Installing BirdDog mesh status command..."
+
+cat > /usr/local/bin/mesh <<'EOF'
+#!/bin/bash
+
+CMD="$1"
+
+if [[ "$CMD" != "status" ]]; then
+    echo "Usage: mesh status"
+    exit 1
+fi
+
+echo "================================="
+echo "BirdDog Mesh Status"
+echo "Node: $(hostname)"
+echo "Time: $(date)"
+echo "================================="
+
+echo ""
+echo "Interface Type:"
+iw dev wlan1 info | grep type
+
+echo ""
+echo "IP Address:"
+ip -4 addr show wlan1 | awk '/inet / {print $2}'
+
+echo ""
+echo "Interface State:"
+ip addr show wlan1 | grep wlan1
+
+echo ""
+echo "Peer Count:"
+PEERS=$(iw dev wlan1 station dump | grep Station | wc -l)
+echo "$PEERS peers"
+
+echo ""
+echo "Peers:"
+iw dev wlan1 station dump | awk '/Station/ {print $2}'
+
+echo ""
+echo "Link State:"
+iw dev wlan1 station dump | grep plink
+
+echo "================================="
+EOF
+
+chmod +x /usr/local/bin/mesh
+
+echo "Mesh command installed: mesh status"
+
+echo ""
 echo "====================================="
 echo "Mesh network install complete"
 echo "Node: $HOSTNAME_INPUT"
@@ -178,7 +227,7 @@ echo "====================================="
 
 echo ""
 echo "Verify mesh with:"
-echo "iw dev wlan1 station dump"
+echo "mesh status"
 echo "ping 10.10.20.X"
 
 echo ""
