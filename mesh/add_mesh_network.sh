@@ -75,6 +75,7 @@ Wants=systemd-networkd.service
 
 [Service]
 Type=oneshot
+ExecStartPre=/bin/bash -c 'until ip link show wlan1 >/dev/null 2>&1; do sleep 1; done'
 ExecStart=/usr/sbin/ip link set wlan1 down
 ExecStart=/usr/sbin/iw dev wlan1 set type mp
 ExecStart=/usr/sbin/ip link set wlan1 up
