@@ -1,10 +1,14 @@
 #!/bin/bash
 set -e
 
+mkdir -p /opt/birddog
+
 LOG="/opt/birddog/install_web.log"
 exec > >(tee -a "$LOG") 2>&1
 
-echo "=== BirdDog Web Setup ==="
+echo "================================="
+echo "BirdDog Web Dashboard Setup"
+echo "================================="
 date
 
 if [ "$EUID" -ne 0 ]; then
@@ -14,10 +18,16 @@ fi
 
 WEB_DIR="/opt/birddog/web"
 
+echo ""
 echo "=== Preparing web directory ==="
 mkdir -p "$WEB_DIR"
 
+
+echo ""
 echo "=== Writing nginx config ==="
+
+mkdir -p /etc/nginx/sites-available
+mkdir -p /etc/nginx/sites-enabled
 
 cat > /etc/nginx/sites-available/default <<EOF
 server {
@@ -35,6 +45,8 @@ server {
 }
 EOF
 
+
+echo ""
 echo "=== Writing dashboard ==="
 
 cat > "$WEB_DIR/index.html" <<'EOF'
@@ -43,6 +55,7 @@ cat > "$WEB_DIR/index.html" <<'EOF'
 <head>
 <meta charset="utf-8">
 <title>BirdDog Dashboard</title>
+
 <style>
 body {
     background: #111;
@@ -51,7 +64,10 @@ body {
     margin: 0;
     padding: 10px;
 }
-h1 { margin-top: 0; }
+
+h1 {
+    margin-top: 0;
+}
 
 button {
     padding: 6px 12px;
@@ -77,10 +93,13 @@ iframe {
 }
 </style>
 </head>
+
 <body>
 
 <h1>BirdDog Live Grid</h1>
+
 <button onclick="loadStreams()">Refresh</button>
+
 <div class="grid" id="grid"></div>
 
 <script>
@@ -119,12 +138,14 @@ async function loadStreams() {
 
             tile.appendChild(title);
             tile.appendChild(frame);
+
             grid.appendChild(tile);
 
         });
 
     } catch (err) {
 
+        console.error(err);
         grid.innerHTML = "Error loading streams.";
 
     }
@@ -139,24 +160,45 @@ loadStreams();
 </html>
 EOF
 
+
+echo ""
 echo "=== Restarting nginx ==="
+
 nginx -t
 systemctl restart nginx
 
+
+echo ""
 echo "=== Verification ==="
 
 echo "--- nginx status ---"
 systemctl status nginx --no-pager
 
+
+echo ""
 echo "--- nginx config test ---"
 nginx -t
 
+
+echo ""
 echo "--- web directory contents ---"
 ls -l "$WEB_DIR"
 
+
+echo ""
 echo "--- port 80 listening ---"
 ss -lntp | grep :80 || true
 
-echo "=== DONE ==="
-echo "Open: http://$(hostname).local"
-echo "Install log saved to: $LOG"
+
+echo ""
+echo "================================="
+echo "BirdDog Web Dashboard Ready"
+echo "================================="
+
+echo ""
+echo "Open the dashboard at:"
+echo "http://$(hostname).local"
+echo ""
+
+echo "Install log saved to:"
+echo "$LOG"
