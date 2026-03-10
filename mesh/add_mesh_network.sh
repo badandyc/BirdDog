@@ -65,6 +65,28 @@ EOF
 systemctl enable systemd-networkd
 systemctl restart systemd-networkd
 
+echo "Installing persistent mesh service..."
+
+cat > /etc/systemd/system/birddog-mesh.service <<EOF
+[Unit]
+Description=BirdDog Mesh Join
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/ip link set wlan1 down
+ExecStart=/usr/sbin/iw dev wlan1 set type mp
+ExecStart=/usr/sbin/ip link set wlan1 up
+ExecStart=/usr/sbin/iw dev wlan1 mesh join birddog-mesh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable birddog-mesh
+
 echo ""
 echo "====================================="
 echo "Mesh network configured"
@@ -74,6 +96,9 @@ echo "IP: $MESH_IP"
 echo "Mesh ID: birddog-mesh"
 echo "====================================="
 
+echo "Mesh will automatically start at boot."
 echo "You can verify peers with:"
 echo "iw dev wlan1 station dump"
+
+echo ""
 echo "Please reboot $HOSTNAME_INPUT now"
