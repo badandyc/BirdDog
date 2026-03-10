@@ -59,14 +59,28 @@ cat > /usr/local/bin/birddog-mesh-join.sh <<'EOF'
 #!/bin/bash
 set -e
 
+# Wait for wlan1 to appear
 until ip link show wlan1 >/dev/null 2>&1; do
     sleep 1
 done
 
+# If already mesh mode, exit cleanly (idempotent)
+MODE=$(iw dev wlan1 info 2>/dev/null | grep "type" | awk '{print $2}')
+
+if [[ "$MODE" == "mesh" || "$MODE" == "mp" || "$MODE" == "mesh point" ]]; then
+    echo "Mesh already active"
+    exit 0
+fi
+
+echo "Configuring mesh interface..."
+
 ip link set wlan1 down || true
-iw dev wlan1 set type mp || true
-ip link set wlan1 up || true
-iw dev wlan1 mesh join birddog-mesh || true
+iw dev wlan1 set type mp
+ip link set wlan1 up
+
+echo "Joining mesh..."
+
+iw dev wlan1 mesh join birddog-mesh
 EOF
 
 chmod +x /usr/local/bin/birddog-mesh-join.sh
@@ -89,7 +103,11 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable birddog-mesh || true
+
+# Critical fix for boot ordering
+systemctl enable systemd-networkd-wait-online.service
+
+systemctl enable birddog-mesh
 
 echo ""
 echo "====================================="
