@@ -59,26 +59,29 @@ cat > /usr/local/bin/birddog-mesh-join.sh <<'EOF'
 #!/bin/bash
 set -e
 
-# Wait for interface
+echo "BirdDog mesh join starting..."
+
+# Wait for interface to appear
 until ip link show wlan1 >/dev/null 2>&1; do
     sleep 1
 done
 
-# Check if already joined
-if iw dev wlan1 info 2>/dev/null | grep -q "mesh id"; then
-    echo "Mesh already joined"
-    exit 0
-fi
+# Wait for networkd to finish configuring
+sleep 5
 
-echo "Configuring mesh interface..."
+echo "Configuring mesh mode..."
 
 ip link set wlan1 down || true
 iw dev wlan1 set type mp
 ip link set wlan1 up
 
+sleep 2
+
 echo "Joining mesh..."
 
-iw dev wlan1 mesh join birddog-mesh
+iw dev wlan1 mesh join birddog-mesh || true
+
+echo "Mesh join attempted."
 EOF
 
 chmod +x /usr/local/bin/birddog-mesh-join.sh
@@ -88,8 +91,8 @@ echo "Installing mesh systemd service..."
 cat > /etc/systemd/system/birddog-mesh.service <<EOF
 [Unit]
 Description=BirdDog Mesh Join
-Wants=network-online.target
-After=network-online.target
+After=network.target systemd-networkd.service
+Wants=network.target
 
 [Service]
 Type=oneshot
@@ -101,10 +104,6 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-
-# Fix for boot ordering
-systemctl enable systemd-networkd-wait-online.service
-
 systemctl enable birddog-mesh
 
 echo ""
@@ -117,7 +116,6 @@ echo "Mesh ID: birddog-mesh"
 echo "====================================="
 
 echo "Mesh will automatically start at boot."
-
 echo "Verify peers with:"
 echo "iw dev wlan1 station dump"
 
