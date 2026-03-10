@@ -48,12 +48,12 @@ echo "BirdDog Mesh Install $(date)" >> "$INSTALL_LOG"
 echo "Node: $HOSTNAME_INPUT" >> "$INSTALL_LOG"
 echo "=====================================" >> "$INSTALL_LOG"
 
-echo "Preventing network managers from touching wlan1..." | tee -a "$INSTALL_LOG"
+echo "Stopping dhcpcd (if present)..."
 
 systemctl stop dhcpcd.service 2>/dev/null || true
 systemctl disable dhcpcd.service 2>/dev/null || true
 
-echo "Creating mesh runtime service..." | tee -a "$INSTALL_LOG"
+echo "Creating mesh runtime service..."
 
 cat <<EOF > /usr/local/bin/birddog-mesh-join.sh
 #!/bin/bash
@@ -70,8 +70,6 @@ until ip link show wlan1 >/dev/null 2>&1; do
     sleep 1
 done
 
-echo "Interface detected" >> \$LOG
-
 ip link set wlan1 down >> \$LOG 2>&1 || true
 iw dev wlan1 set type mp >> \$LOG 2>&1
 ip link set wlan1 up >> \$LOG 2>&1
@@ -79,15 +77,14 @@ ip link set wlan1 up >> \$LOG 2>&1
 sleep 2
 
 iw dev wlan1 mesh join birddog-mesh >> \$LOG 2>&1 || true
-
 ip addr add $MESH_IP/24 dev wlan1 >> \$LOG 2>&1 || true
 
-echo "Final interface state:" >> \$LOG
-ip addr show wlan1 >> \$LOG 2>&1
-iw dev wlan1 info >> \$LOG 2>&1
+echo "Interface state:" >> \$LOG
+ip addr show wlan1 >> \$LOG
+iw dev wlan1 info >> \$LOG
 
-echo "Mesh peers:" >> \$LOG
-iw dev wlan1 station dump >> \$LOG 2>&1
+echo "Peers:" >> \$LOG
+iw dev wlan1 station dump >> \$LOG
 
 echo "Mesh runtime complete" >> \$LOG
 EOF
@@ -112,7 +109,7 @@ systemctl daemon-reload
 systemctl enable birddog-mesh
 systemctl start birddog-mesh
 
-echo "Installing mesh command operator..."
+echo "Installing mesh command..."
 
 cat <<'EOF' > /usr/local/bin/mesh
 #!/bin/bash
@@ -138,24 +135,53 @@ echo $MAC
 mesh_table() {
 
 echo ""
-echo "Node        IP              Signal     LinkMetric"
-echo "--------------------------------------------------"
+echo "Node        IP              Signal      Metric"
+echo "------------------------------------------------"
 
-SELF_NODE=$(hostname)
+SELF=$(hostname)
 SELF_IP=$(ip -4 addr show wlan1 | grep inet | awk '{print $2}')
 
-printf "%-12s %-15s %-10s %-10s\n" "$SELF_NODE" "$SELF_IP" "self" "-"
+printf "%-12s %-15s %-10s %-10s\n" "$SELF" "$SELF_IP" "self" "-"
 
 iw dev wlan1 station dump | grep Station | awk '{print $2}' | while read MAC
 do
 
-IP=$(ip neigh | grep $MAC | awk '{print $1}' | head -n1)
 HOST=$(resolve_peer $MAC)
 
+IP=$(ip neigh | grep $MAC | awk '{print $1}' | head -n1)
+
 SIGNAL=$(iw dev wlan1 station dump | grep -A20 $MAC | grep signal: | awk '{print $2}' | head -n1)
+
 METRIC=$(iw dev wlan1 station dump | grep -A20 $MAC | grep metric | awk '{print $4}' | head -n1)
 
 printf "%-12s %-15s %-10s %-10s\n" "$HOST" "$IP" "$SIGNAL dBm" "$METRIC"
+
+done
+
+echo ""
+
+}
+
+multi_hop_map() {
+
+echo ""
+echo "Mesh Routes"
+echo "--------------------------------"
+
+ip route show dev wlan1 | while read line
+do
+
+DEST=$(echo $line | awk '{print $1}')
+NEXTHOP=$(echo $line | grep -o 'via [0-9.]*' | awk '{print $2}')
+
+if [ -n "$NEXTHOP" ]; then
+
+HOST=$(avahi-resolve-address $DEST 2>/dev/null | awk '{print $2}' | sed 's/.local//')
+NEXT=$(avahi-resolve-address $NEXTHOP 2>/dev/null | awk '{print $2}' | sed 's/.local//')
+
+echo "$HOST  ->  $NEXT"
+
+fi
 
 done
 
@@ -198,19 +224,16 @@ HOST=$(resolve_peer $MAC)
 
 SIGNAL=$(iw dev wlan1 station dump | grep -A20 $MAC | grep signal: | awk '{print $2}' | head -n1)
 RATE=$(iw dev wlan1 station dump | grep -A20 $MAC | grep bitrate | awk '{print $3}' | head -n1)
-METRIC=$(iw dev wlan1 station dump | grep -A20 $MAC | grep metric | awk '{print $4}' | head -n1)
 
 echo ""
 echo "Peer: $HOST"
 echo "MAC: $MAC"
 echo "Signal: $SIGNAL dBm"
 echo "TX Rate: $RATE"
-echo "Link Metric: $METRIC"
 
 done
 
 echo ""
-echo "================================="
 
 ;;
 
@@ -231,7 +254,7 @@ echo "$SELF  <---->  $HOST"
 
 done
 
-echo "================================="
+multi_hop_map
 
 ;;
 
@@ -255,8 +278,7 @@ echo "├── $HOST"
 
 done
 
-echo ""
-echo "================================="
+multi_hop_map
 
 ;;
 
@@ -275,10 +297,10 @@ echo "BirdDog Mesh Command"
 echo "================================="
 echo ""
 echo "mesh status   → mesh health overview"
-echo "mesh peers    → RF metrics for peers"
-echo "mesh map      → direct neighbors"
+echo "mesh peers    → RF metrics"
+echo "mesh map      → direct + multi-hop"
+echo "mesh graph    → topology tree"
 echo "mesh scan     → discovered nodes"
-echo "mesh graph    → mesh topology"
 echo "mesh help     → this menu"
 echo ""
 echo "================================="
@@ -289,6 +311,7 @@ echo ""
 *)
 
 echo "Unknown command"
+
 ;;
 
 esac
@@ -303,7 +326,6 @@ echo "Node: $HOSTNAME_INPUT"
 echo "Interface: wlan1"
 echo "IP: $MESH_IP"
 echo "Mesh ID: birddog-mesh"
-echo "Log: /opt/birddog/mesh/mesh_runtime.log"
 echo "====================================="
 
 echo ""
