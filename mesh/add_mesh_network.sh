@@ -56,12 +56,14 @@ MESH_IP="10.10.20.$((NODE_NUM*10))"
 echo "Calculated mesh IP: $MESH_IP"
 
 echo ""
-echo "Creating mesh startup script..."
+echo "Creating mesh runtime script..."
 
 cat > /usr/local/bin/birddog-mesh-join.sh <<EOF
 #!/bin/bash
 
 LOG="/opt/birddog/mesh/mesh_runtime.log"
+
+mkdir -p /opt/birddog/mesh
 
 exec >> \$LOG 2>&1
 
@@ -69,40 +71,43 @@ echo "================================="
 echo "Mesh runtime start \$(date)"
 echo "Hostname: \$(hostname)"
 
+echo "Waiting for USB WiFi initialization..."
+sleep 10
+
 echo "Waiting for wlan1..."
 
 until ip link show wlan1 >/dev/null 2>&1; do
-    sleep 1
+    sleep 2
 done
 
 echo "Interface detected"
 
-echo "Initial state:"
+echo "Initial interface state:"
 ip addr show wlan1
 iw dev wlan1 info
 
-echo "Bringing interface down"
+echo "Resetting interface..."
 ip link set wlan1 down || true
 
-echo "Setting mesh mode"
+echo "Setting mesh mode..."
 iw dev wlan1 set type mp
 
-echo "Bringing interface up"
+echo "Bringing interface up..."
 ip link set wlan1 up
 
-sleep 1
+sleep 2
 
-echo "Joining mesh"
+echo "Joining mesh network..."
 iw dev wlan1 mesh join birddog-mesh
 
 echo "Assigning IP $MESH_IP"
 ip addr add $MESH_IP/24 dev wlan1 || true
 
-echo "Final interface state"
+echo "Final interface state:"
 iw dev wlan1 info
 ip addr show wlan1
 
-echo "Mesh peers"
+echo "Mesh peers:"
 iw dev wlan1 station dump
 
 echo "Mesh runtime complete"
@@ -110,7 +115,7 @@ EOF
 
 chmod +x /usr/local/bin/birddog-mesh-join.sh
 
-echo "Mesh startup script created:"
+echo "Mesh runtime script installed:"
 ls -l /usr/local/bin/birddog-mesh-join.sh
 
 echo ""
@@ -130,7 +135,7 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 
-echo "Service file contents:"
+echo "Service file created:"
 cat /etc/systemd/system/birddog-mesh.service
 
 echo ""
@@ -138,16 +143,16 @@ echo "Reloading systemd..."
 
 systemctl daemon-reload
 
-echo "Enabling service..."
+echo "Enabling mesh service..."
 
 systemctl enable birddog-mesh
 
-echo "Starting service..."
+echo "Restarting mesh service..."
 
-systemctl start birddog-mesh || true
+systemctl restart birddog-mesh || true
 
 echo ""
-echo "Service status after start:"
+echo "Service status:"
 systemctl status birddog-mesh || true
 
 echo ""
@@ -160,3 +165,11 @@ echo ""
 echo "Install log: /opt/birddog/mesh/mesh_install.log"
 echo "Runtime log: /opt/birddog/mesh/mesh_runtime.log"
 echo "====================================="
+
+echo ""
+echo "Verify mesh with:"
+echo "iw dev wlan1 station dump"
+echo "ping 10.10.20.X"
+
+echo ""
+echo "Reboot when ready to test persistence."
