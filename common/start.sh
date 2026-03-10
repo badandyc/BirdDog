@@ -61,29 +61,40 @@ fi
 echo "Detected $ROLE node"
 echo ""
 
+
+# --------------------------------------------------
+# RADIO MAPPING
+# --------------------------------------------------
+
+echo "[1] Mapping radio interfaces..."
+echo ""
+
+sudo bash /opt/birddog/common/radio_map_setup.sh
+
+
 # --------------------------------------------------
 # BDM INSTALL
 # --------------------------------------------------
 
 if [[ "$ROLE" == "BDM" ]]; then
 
-    echo "[1/5] Running BDM initial setup..."
+    echo "[2/6] Running BDM initial setup..."
     echo ""
     sudo bash /opt/birddog/bdm/bdm_initial_setup.sh "$HOSTNAME_INPUT"
 
-    echo "[2/5] Configuring BDM Access Point..."
+    echo "[3/6] Configuring BDM Access Point..."
     echo ""
     sudo bash /opt/birddog/bdm/bdm_AP_setup.sh "$HOSTNAME_INPUT"
 
-    echo "[3/5] Installing MediaMTX streaming server..."
+    echo "[4/6] Installing MediaMTX streaming server..."
     echo ""
     sudo bash /opt/birddog/bdm/bdm_mediamtx_setup.sh "$HOSTNAME_INPUT"
 
-    echo "[4/5] Installing BirdDog web interface..."
+    echo "[5/6] Installing BirdDog web interface..."
     echo ""
     sudo bash /opt/birddog/bdm/bdm_web_setup.sh "$HOSTNAME_INPUT"
 
-    echo "[5/5] Configuring Mesh Network..."
+    echo "[6/6] Configuring Mesh Network..."
     echo ""
     sudo bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
 
@@ -96,11 +107,11 @@ fi
 
 if [[ "$ROLE" == "BDC" ]]; then
 
-    echo "[1/2] Running BDC setup..."
+    echo "[2/3] Running BDC setup..."
     echo ""
     sudo bash /opt/birddog/bdc/bdc_fresh_install_setup.sh "$HOSTNAME_INPUT"
 
-    echo "[2/2] Configuring Mesh Network..."
+    echo "[3/3] Configuring Mesh Network..."
     echo ""
     sudo bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
 
