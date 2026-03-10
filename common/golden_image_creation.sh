@@ -7,7 +7,7 @@ echo "[1/12] Installing required packages (if missing)..."
 
 #sudo apt update
 
-for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git; do
+for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool; do
     if dpkg -s "$pkg" >/dev/null 2>&1; then
         echo " - $pkg already installed"
     else
@@ -21,7 +21,7 @@ echo "[1/12] Package check complete."
 
 echo "[2/12] Creating BirdDog directory structure..."
 
-sudo mkdir -p /opt/birddog/{bdm,bdc,mesh,mediamtx,web,version}
+sudo mkdir -p /opt/birddog/{bdm,bdc,mesh,common,mediamtx,web,version}
 sudo chmod -R 777 /opt/birddog
 
 echo "[2/12] Directory structure created."
@@ -39,7 +39,7 @@ echo "[4/12] Cleaning previous scripts..."
 rm -f /opt/birddog/bdm/*.sh || true
 rm -f /opt/birddog/bdc/*.sh || true
 rm -f /opt/birddog/mesh/*.sh || true
-rm -f /opt/birddog/start.sh || true
+rm -f /opt/birddog/common/*.sh || true
 
 echo "[4/12] Cleanup complete."
 
@@ -77,17 +77,21 @@ echo " - add_mesh_network.sh downloaded"
 echo "[7/12] Mesh scripts complete."
 
 
-echo "[8/12] Downloading start script..."
+echo "[8/12] Downloading common scripts..."
 
-curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/start.sh?$(date +%s)" -o start.sh
+curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/start.sh?$(date +%s)" -o common/start.sh
 echo " - start.sh downloaded"
 
-echo "[8/12] Start script complete."
+curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/radio_map_setup.sh?$(date +%s)" -o common/radio_map_setup.sh
+echo " - radio_map_setup.sh downloaded"
+
+echo "[8/12] Common scripts complete."
 
 
 echo "[9/12] Setting executable permissions..."
 
-sudo chmod +x /opt/birddog/start.sh
+sudo chmod +x /opt/birddog/common/start.sh
+sudo chmod +x /opt/birddog/common/*.sh
 sudo chmod +x /opt/birddog/bdm/*.sh
 sudo chmod +x /opt/birddog/bdc/*.sh
 sudo chmod +x /opt/birddog/mesh/*.sh
@@ -99,6 +103,9 @@ echo "[10/12] Verifying installation..."
 
 echo "--- /opt/birddog ---"
 ls -1 /opt/birddog
+
+echo "--- /opt/birddog/common ---"
+ls -1 /opt/birddog/common
 
 echo "--- /opt/birddog/bdm ---"
 ls -1 /opt/birddog/bdm
@@ -144,19 +151,19 @@ case "$START_NOW" in
         echo ""
         echo "Launching BirdDog setup..."
         echo ""
-        sudo /opt/birddog/start.sh
+        sudo /opt/birddog/common/start.sh
         ;;
     [Nn]* )
         echo ""
         echo "Setup skipped."
         echo ""
         echo "You can run it later with:"
-        echo "sudo /opt/birddog/start.sh"
+        echo "sudo /opt/birddog/common/start.sh"
         ;;
     * )
         echo ""
         echo "Invalid response. Exiting without running setup."
         echo "Run manually with:"
-        echo "sudo /opt/birddog/start.sh"
+        echo "sudo /opt/birddog/common/start.sh"
         ;;
 esac
