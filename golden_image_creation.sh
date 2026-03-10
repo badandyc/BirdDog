@@ -3,7 +3,7 @@ set -e
 
 echo "=== BirdDog Golden Image Creation ==="
 
-echo "[1/11] Installing required packages (if missing)..."
+echo "[1/12] Installing required packages (if missing)..."
 
 #sudo apt update
 
@@ -16,35 +16,35 @@ for pkg in ffmpeg rpicam-apps avahi-daemon nginx hostapd dnsmasq git; do
     fi
 done
 
-echo "[1/11] Package check complete."
+echo "[1/12] Package check complete."
 
 
-echo "[2/11] Creating BirdDog directory structure..."
+echo "[2/12] Creating BirdDog directory structure..."
 
 sudo mkdir -p /opt/birddog/{bdm,bdc,mesh,mediamtx,web,version}
 sudo chmod -R 777 /opt/birddog
 
-echo "[2/11] Directory structure created."
+echo "[2/12] Directory structure created."
 
 
-echo "[3/11] Switching to /opt/birddog..."
+echo "[3/12] Switching to /opt/birddog..."
 
 cd /opt/birddog
 
-echo "[3/11] Working directory set."
+echo "[3/12] Working directory set."
 
 
-echo "[4/11] Cleaning previous scripts..."
+echo "[4/12] Cleaning previous scripts..."
 
 rm -f /opt/birddog/bdm/*.sh || true
 rm -f /opt/birddog/bdc/*.sh || true
 rm -f /opt/birddog/mesh/*.sh || true
 rm -f /opt/birddog/start.sh || true
 
-echo "[4/11] Cleanup complete."
+echo "[4/12] Cleanup complete."
 
 
-echo "[5/11] Downloading BDM scripts..."
+echo "[5/12] Downloading BDM scripts..."
 
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_initial_setup.sh?$(date +%s)" -o bdm/bdm_initial_setup.sh
 echo " - bdm_initial_setup.sh downloaded"
@@ -58,44 +58,44 @@ echo " - bdm_mediamtx_setup.sh downloaded"
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_web_setup.sh?$(date +%s)" -o bdm/bdm_web_setup.sh
 echo " - bdm_web_setup.sh downloaded"
 
-echo "[5/11] BDM scripts complete."
+echo "[5/12] BDM scripts complete."
 
 
-echo "[6/11] Downloading BDC scripts..."
+echo "[6/12] Downloading BDC scripts..."
 
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/bdc/bdc_fresh_install_setup.sh?$(date +%s)" -o bdc/bdc_fresh_install_setup.sh
 echo " - bdc_fresh_install_setup.sh downloaded"
 
-echo "[6/11] BDC scripts complete."
+echo "[6/12] BDC scripts complete."
 
 
-echo "[7/11] Downloading mesh scripts..."
+echo "[7/12] Downloading mesh scripts..."
 
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/mesh/add_mesh_network.sh?$(date +%s)" -o mesh/add_mesh_network.sh
 echo " - add_mesh_network.sh downloaded"
 
-echo "[7/11] Mesh scripts complete."
+echo "[7/12] Mesh scripts complete."
 
 
-echo "[8/11] Downloading start script..."
+echo "[8/12] Downloading start script..."
 
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/start.sh?$(date +%s)" -o start.sh
 echo " - start.sh downloaded"
 
-echo "[8/11] Start script complete."
+echo "[8/12] Start script complete."
 
 
-echo "[9/11] Setting executable permissions..."
+echo "[9/12] Setting executable permissions..."
 
 sudo chmod +x /opt/birddog/start.sh
 sudo chmod +x /opt/birddog/bdm/*.sh
 sudo chmod +x /opt/birddog/bdc/*.sh
 sudo chmod +x /opt/birddog/mesh/*.sh
 
-echo "[9/11] Permissions applied."
+echo "[9/12] Permissions applied."
 
 
-echo "[10/11] Verifying installation..."
+echo "[10/12] Verifying installation..."
 
 echo "--- /opt/birddog ---"
 ls -1 /opt/birddog
@@ -109,10 +109,10 @@ ls -1 /opt/birddog/bdc
 echo "--- /opt/birddog/mesh ---"
 ls -1 /opt/birddog/mesh
 
-echo "[10/11] Verification complete."
+echo "[10/12] Verification complete."
 
 
-echo "[11/11] Writing BirdDog version..."
+echo "[11/12] Writing BirdDog version..."
 
 VERSION_DIR="/opt/birddog/version"
 VERSION_FILE="$VERSION_DIR/VERSION"
@@ -130,7 +130,33 @@ cat $VERSION_FILE
 echo "====================================="
 echo "BirdDog Golden Image Setup Complete"
 echo "Scripts installed to /opt/birddog"
-echo ""
-echo "Run setup with:"
-echo "sudo /opt/birddog/start.sh"
 echo "====================================="
+
+
+echo ""
+echo "[12/12] Launch BirdDog setup?"
+echo ""
+
+read -p "Start setup now (run start.sh)? [Y/N]: " START_NOW
+
+case "$START_NOW" in
+    [Yy]* )
+        echo ""
+        echo "Launching BirdDog setup..."
+        echo ""
+        sudo /opt/birddog/start.sh
+        ;;
+    [Nn]* )
+        echo ""
+        echo "Setup skipped."
+        echo ""
+        echo "You can run it later with:"
+        echo "sudo /opt/birddog/start.sh"
+        ;;
+    * )
+        echo ""
+        echo "Invalid response. Exiting without running setup."
+        echo "Run manually with:"
+        echo "sudo /opt/birddog/start.sh"
+        ;;
+esac
