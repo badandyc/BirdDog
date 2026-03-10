@@ -8,9 +8,20 @@ echo "=== BirdDog BDC Installer ==="
 date
 
 if [ "$EUID" -ne 0 ]; then
-    echo "Run as root: sudo bash /opt/birddog/bdc/bdc_fresh_install_setup.sh"
+    echo "Run as root: sudo bash /opt/birddog/start.sh"
     exit 1
 fi
+
+# Hostname passed from start.sh
+NEW_HOSTNAME="$1"
+
+if [[ -z "$NEW_HOSTNAME" ]]; then
+    echo "Error: hostname not provided."
+    echo "Run via: sudo bash /opt/birddog/start.sh"
+    exit 1
+fi
+
+echo "BDC hostname received: $NEW_HOSTNAME"
 
 # Disable cloud-init if present
 if [ -d /etc/cloud ]; then
@@ -22,22 +33,10 @@ echo "=== Enabling Avahi ==="
 systemctl enable avahi-daemon
 systemctl start avahi-daemon
 
-# --- Hostname selection loop ---
-while true; do
-    read -p "Enter BDC hostname (e.g. bdc-01): " NEW_HOSTNAME
-
-    if [[ -z "$NEW_HOSTNAME" ]]; then
-        echo "Hostname cannot be empty."
-        continue
-    fi
-
-    if avahi-resolve-host-name "$NEW_HOSTNAME.local" >/dev/null 2>&1; then
-        echo "Hostname already exists on network. Choose another."
-        continue
-    fi
-
-    break
-done
+# Verify hostname is not already on network
+if avahi-resolve-host-name "$NEW_HOSTNAME.local" >/dev/null 2>&1; then
+    echo "Warning: hostname already detected on network."
+fi
 
 NODE_NUM=$(echo "$NEW_HOSTNAME" | grep -oE '[0-9]+$')
 
@@ -60,16 +59,6 @@ BDM_HOST="${BDM_NAME}.local"
 echo "BDC Hostname: $NEW_HOSTNAME"
 echo "Stream name: $STREAM_NAME"
 echo "BDM target: $BDM_HOST"
-
-echo "$NEW_HOSTNAME" > /etc/hostname
-
-if grep -q "^127.0.1.1" /etc/hosts; then
-    sed -i "s/^127.0.1.1.*/127.0.1.1    $NEW_HOSTNAME/" /etc/hosts
-else
-    echo "127.0.1.1    $NEW_HOSTNAME" >> /etc/hosts
-fi
-
-hostname "$NEW_HOSTNAME"
 
 systemctl restart avahi-daemon
 
