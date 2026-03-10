@@ -55,7 +55,7 @@ MESH_IP="10.10.20.$((NODE_NUM*10))"
 echo "Calculated mesh IP: $MESH_IP"
 
 echo ""
-echo "Configuring network managers to ignore wlan1..."
+echo "Preventing network managers from touching wlan1..."
 
 if ! grep -q "denyinterfaces wlan1" /etc/dhcpcd.conf; then
   echo "denyinterfaces wlan1" >> /etc/dhcpcd.conf
@@ -117,17 +117,19 @@ ip addr add $MESH_IP/24 dev wlan1 2>/dev/null || true
 
 echo "Mesh interface ready"
 
-#################################################
-# MESH SELF HEAL LOOP
-#################################################
+############################################
+# SELF HEAL LOOP
+############################################
 
 while true
 do
+
     PEERS=\$(iw dev wlan1 station dump | grep Station | wc -l)
 
     echo "Peer count: \$PEERS"
 
     if [ "\$PEERS" -eq 0 ]; then
+
         echo "No mesh peers detected — attempting rejoin..."
 
         iw dev wlan1 mesh leave || true
@@ -135,9 +137,11 @@ do
         iw dev wlan1 mesh join birddog-mesh || true
 
         echo "Rejoin attempted"
+
     fi
 
     sleep 30
+
 done
 
 EOF
@@ -167,7 +171,7 @@ systemctl enable birddog-mesh
 systemctl restart birddog-mesh
 
 echo ""
-echo "Installing BirdDog mesh operator command..."
+echo "Installing mesh operator command..."
 
 cat > /usr/local/bin/mesh <<'EOF'
 #!/bin/bash
@@ -196,23 +200,16 @@ echo "IP Address:"
 ip -4 addr show wlan1 | awk '/inet / {print $2}'
 
 echo ""
-echo "Interface State:"
-ip addr show wlan1 | grep wlan1
-
-echo ""
 echo "Peer Count:"
 PEERS=$(iw dev wlan1 station dump | grep Station | wc -l)
 echo "$PEERS peers"
-
-echo ""
-echo "Peers:"
-iw dev wlan1 station dump | awk '/Station/ {print $2}'
 
 echo ""
 echo "Link State:"
 iw dev wlan1 station dump | grep plink
 
 echo "================================="
+
 exit 0
 fi
 
@@ -221,7 +218,6 @@ if [[ "$CMD" == "peers" ]]; then
 
 echo "================================="
 echo "BirdDog Mesh Peer Details"
-echo "Node: $(hostname)"
 echo "================================="
 
 iw dev wlan1 station dump | awk '
@@ -235,12 +231,35 @@ iw dev wlan1 station dump | awk '
 
 echo ""
 echo "================================="
+
 exit 0
 fi
+
+
+if [[ "$CMD" == "map" ]]; then
+
+echo "================================="
+echo "BirdDog Mesh Topology"
+echo "Node: $(hostname)"
+echo "================================="
+
+LOCAL=$(hostname)
+
+iw dev wlan1 station dump | awk -v node="$LOCAL" '
+/Station/ {printf "%s  <---->  %s\n", node, $2}
+'
+
+echo ""
+echo "================================="
+
+exit 0
+fi
+
 
 echo "Usage:"
 echo "mesh status"
 echo "mesh peers"
+echo "mesh map"
 
 EOF
 
@@ -257,13 +276,16 @@ echo "Runtime log: /opt/birddog/mesh/mesh_runtime.log"
 echo "====================================="
 
 echo ""
-echo "Commands available:"
+echo "Commands installed:"
 echo "mesh status"
 echo "mesh peers"
+echo "mesh map"
+
 echo ""
 echo "Verify mesh with:"
 echo "mesh status"
 echo "mesh peers"
+echo "mesh map"
 echo "ping 10.10.20.X"
 
 echo ""
