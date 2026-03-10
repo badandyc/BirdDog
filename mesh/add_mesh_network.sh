@@ -4,7 +4,6 @@ set -e
 LOG="/opt/birddog/mesh/mesh_install.log"
 
 mkdir -p /opt/birddog/mesh
-
 exec > >(tee -a "$LOG") 2>&1
 
 echo "====================================="
@@ -49,11 +48,11 @@ echo "Mesh IP: $MESH_IP"
 echo ""
 echo "Preventing network managers from touching wlan1..."
 
-if ! grep -q "denyinterfaces wlan1" /etc/dhcpcd.conf; then
-  echo "denyinterfaces wlan1" >> /etc/dhcpcd.conf
+if ! grep -q "denyinterfaces wlan1" /etc/dhcpcd.conf 2>/dev/null; then
+  echo "denyinterfaces wlan1" >> /etc/dhcpcd.conf 2>/dev/null || true
 fi
 
-systemctl restart dhcpcd || true
+systemctl restart dhcpcd 2>/dev/null || true
 systemctl stop wpa_supplicant@wlan1 2>/dev/null || true
 systemctl disable wpa_supplicant@wlan1 2>/dev/null || true
 
@@ -144,6 +143,10 @@ cat > /usr/local/bin/mesh <<'EOF'
 
 CMD="$1"
 
+########################################
+# Resolve MAC → hostname
+########################################
+
 resolve_mac() {
 
 MAC="$1"
@@ -151,13 +154,22 @@ MAC="$1"
 IP=$(ip neigh | grep "$MAC" | awk '{print $1}')
 
 if [[ -n "$IP" ]]; then
-HOST=$(getent hosts "$IP" | awk '{print $2}' | cut -d'.' -f1)
-[ -n "$HOST" ] && echo "$HOST" && return
+
+LAST=$(echo "$IP" | awk -F. '{print $4}')
+NUM=$(printf "%02d" $((LAST/10)))
+
+echo "bdc-$NUM"
+return
+
 fi
 
 echo "$MAC"
 
 }
+
+########################################
+# HELP MENU
+########################################
 
 show_help() {
 
@@ -183,9 +195,9 @@ show_help
 exit
 fi
 
-###################################
+########################################
 # STATUS
-###################################
+########################################
 
 if [[ "$CMD" == "status" ]]; then
 
@@ -214,9 +226,9 @@ echo "================================="
 exit
 fi
 
-###################################
+########################################
 # PEERS
-###################################
+########################################
 
 if [[ "$CMD" == "peers" ]]; then
 
@@ -228,10 +240,13 @@ iw dev wlan1 station dump | while read line
 do
 
 if [[ $line == Station* ]]; then
+
 MAC=$(echo $line | awk '{print $2}')
 NAME=$(resolve_mac "$MAC")
+
 echo ""
 echo "Peer: $NAME"
+
 fi
 
 [[ $line == *signal:* ]] && echo "Signal:" $(echo $line | awk '{print $2}') "dBm"
@@ -248,9 +263,9 @@ echo "================================="
 exit
 fi
 
-###################################
+########################################
 # MAP
-###################################
+########################################
 
 if [[ "$CMD" == "map" ]]; then
 
@@ -271,9 +286,9 @@ echo "================================="
 exit
 fi
 
-###################################
+########################################
 # SCAN
-###################################
+########################################
 
 if [[ "$CMD" == "scan" ]]; then
 
@@ -285,13 +300,11 @@ ip neigh show dev wlan1 | while read line
 do
 
 IP=$(echo $line | awk '{print $1}')
-MAC=$(echo $line | awk '{print $5}')
 
-HOST=$(getent hosts "$IP" | awk '{print $2}' | cut -d'.' -f1)
+LAST=$(echo "$IP" | awk -F. '{print $4}')
+NUM=$(printf "%02d" $((LAST/10)))
 
-[ -z "$HOST" ] && HOST="$MAC"
-
-echo "$HOST  ($IP)"
+echo "bdc-$NUM ($IP)"
 
 done
 
@@ -300,9 +313,9 @@ echo "================================="
 exit
 fi
 
-###################################
+########################################
 # GRAPH
-###################################
+########################################
 
 if [[ "$CMD" == "graph" ]]; then
 
@@ -327,9 +340,9 @@ echo "================================="
 exit
 fi
 
-###################################
+########################################
 # HELP
-###################################
+########################################
 
 if [[ "$CMD" == "help" ]]; then
 show_help
