@@ -59,6 +59,7 @@ Name=wlan1
 
 [Network]
 Address=${MESH_IP}/24
+ConfigureWithoutCarrier=yes
 EOF
 
 systemctl enable systemd-networkd
