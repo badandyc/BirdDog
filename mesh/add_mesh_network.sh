@@ -70,7 +70,8 @@ echo "Installing persistent mesh service..."
 cat > /etc/systemd/system/birddog-mesh.service <<EOF
 [Unit]
 Description=BirdDog Mesh Join
-After=network.target
+After=systemd-networkd.service
+Wants=systemd-networkd.service
 
 [Service]
 Type=oneshot
