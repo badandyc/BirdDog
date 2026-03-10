@@ -76,3 +76,4 @@ echo "====================================="
 
 echo "You can verify peers with:"
 echo "iw dev wlan1 station dump"
+echo "Please reboot $HOSTNAME_INPUT now"
