@@ -1,11 +1,6 @@
 #!/bin/bash
 set -e
 
-if [ "$EUID" -ne 0 ]; then
-  echo "Run as root: sudo bash /opt/birddog/start.sh"
-  exit 1
-fi
-
 echo ""
 echo "====================================="
 echo "BirdDog Master Bootstrap"
@@ -15,66 +10,77 @@ echo ""
 read -p "Enter hostname (bdm-01, bdc-01, etc): " HOSTNAME_INPUT
 
 if [[ -z "$HOSTNAME_INPUT" ]]; then
-  echo "Hostname required"
-  exit 1
+    echo "Hostname cannot be empty."
+    exit 1
 fi
 
-echo "$HOSTNAME_INPUT" > /etc/hostname
-hostname "$HOSTNAME_INPUT"
-
-if grep -q "^127.0.1.1" /etc/hosts; then
-  sed -i "s/^127.0.1.1.*/127.0.1.1    $HOSTNAME_INPUT/" /etc/hosts
-else
-  echo "127.0.1.1    $HOSTNAME_INPUT" >> /etc/hosts
+# Validate hostname format
+if [[ ! "$HOSTNAME_INPUT" =~ ^bd[mc]-[0-9]{2}$ ]]; then
+    echo ""
+    echo "Invalid hostname format."
+    echo "Expected examples:"
+    echo "  bdm-01"
+    echo "  bdc-01"
+    echo ""
+    exit 1
 fi
 
-echo "Hostname set to $HOSTNAME_INPUT"
+echo ""
+echo "Setting hostname to $HOSTNAME_INPUT"
 echo ""
 
+sudo hostnamectl set-hostname "$HOSTNAME_INPUT"
+
+NODE_NUM=$(echo "$HOSTNAME_INPUT" | grep -oE '[0-9]+$')
+
+echo "Node number detected: $NODE_NUM"
+
+echo ""
 echo "=== Determining node role ==="
 
-if [[ $HOSTNAME_INPUT == bdm-* ]]; then
+ROLE_PREFIX=$(echo "$HOSTNAME_INPUT" | cut -d'-' -f1)
 
-  echo "Detected BDM node"
-  
-  echo "[1/5] Running BDM initial setup..."
-  bash /opt/birddog/bdm/bdm_initial_setup.sh "$HOSTNAME_INPUT"
-
-  echo "[2/5] Configuring Access Point..."
-  bash /opt/birddog/bdm/bdm_AP_setup.sh "$HOSTNAME_INPUT"
-
-  echo "[3/5] Configuring MediaMTX..."
-  bash /opt/birddog/bdm/bdm_mediamtx_setup.sh "$HOSTNAME_INPUT"
-
-  echo "[4/5] Installing Web Dashboard..."
-  bash /opt/birddog/bdm/bdm_web_setup.sh "$HOSTNAME_INPUT"
-
-  echo "[5/5] Configuring Mesh Network..."
-  bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
-
-
-elif [[ $HOSTNAME_INPUT == bdc-* ]]; then
-
-  echo "Detected BDC node"
-  
-  echo "[1/2] Running BDC setup..."
-  bash /opt/birddog/bdc/bdc_fresh_install_setup.sh "$HOSTNAME_INPUT"
-
-  echo "[2/2] Configuring Mesh Network..."
-  bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
-
+if [[ "$ROLE_PREFIX" == "bdm" ]]; then
+    ROLE="BDM"
+elif [[ "$ROLE_PREFIX" == "bdc" ]]; then
+    ROLE="BDC"
 else
+    echo "Unable to determine node role."
+    exit 1
+fi
 
-  echo "Unknown node type"
-  echo "Use hostname starting with:"
-  echo "bdm-XX  (master)"
-  echo "bdc-XX  (camera node)"
-  exit 1
+echo "Detected $ROLE node"
+
+echo ""
+
+# Run appropriate installer
+if [[ "$ROLE" == "BDM" ]]; then
+
+    echo "[1/2] Running BDM setup..."
+    echo ""
+
+    sudo bash /opt/birddog/bdm/bdm_initial_setup.sh "$HOSTNAME_INPUT"
+
+elif [[ "$ROLE" == "BDC" ]]; then
+
+    echo "[1/2] Running BDC setup..."
+    echo ""
+
+    sudo bash /opt/birddog/bdc/bdc_fresh_install_setup.sh "$HOSTNAME_INPUT"
 
 fi
+
+
+echo ""
+echo "[2/2] Configuring Mesh Network..."
+echo ""
+
+sudo bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
 
 echo ""
 echo "====================================="
 echo "BirdDog Bootstrap Complete"
-echo "Hostname: $(hostname)"
+echo "Hostname: $HOSTNAME_INPUT"
+echo "Role: $ROLE"
 echo "====================================="
+echo ""
