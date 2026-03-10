@@ -12,3 +12,4 @@ http://10.10.10.1:8889/cam01 \
 ssh-keygen -R x.x.x.x \
 iw dev wlan1 station dump \
 rpicam-vid -t 5000 -o test.h264 \
+ip addr show wlan1 \
