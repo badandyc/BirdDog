@@ -70,16 +70,18 @@ echo "Installing persistent mesh service..."
 cat > /etc/systemd/system/birddog-mesh.service <<EOF
 [Unit]
 Description=BirdDog Mesh Join
-After=network-online.target
 Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=oneshot
 ExecStartPre=/bin/bash -c 'until ip link show wlan1 >/dev/null 2>&1; do sleep 1; done'
-ExecStart=/usr/sbin/ip link set wlan1 down
-ExecStart=/usr/sbin/iw dev wlan1 set type mp
-ExecStart=/usr/sbin/ip link set wlan1 up
-ExecStart=/usr/sbin/iw dev wlan1 mesh join birddog-mesh
+ExecStart=/bin/bash -c '
+ip link set wlan1 down || true
+iw dev wlan1 set type mp || true
+ip link set wlan1 up || true
+iw dev wlan1 mesh join birddog-mesh || true
+'
 RemainAfterExit=yes
 
 [Install]
