@@ -38,16 +38,16 @@ if [[ $HOSTNAME_INPUT == bdm-* ]]; then
   echo "Detected BDM node"
   
   echo "[1/4] Running BDM initial setup..."
-  bash /opt/birddog/bdm/bdm_initial_setup.sh
+  bash /opt/birddog/bdm/bdm_initial_setup.sh "$HOSTNAME_INPUT"
 
   echo "[2/4] Configuring Access Point..."
-  bash /opt/birddog/bdm/bdm_AP_setup.sh
+  bash /opt/birddog/bdm/bdm_AP_setup.sh "$HOSTNAME_INPUT"
 
   echo "[3/4] Configuring MediaMTX..."
-  bash /opt/birddog/bdm/bdm_mediamtx_setup.sh
+  bash /opt/birddog/bdm/bdm_mediamtx_setup.sh "$HOSTNAME_INPUT"
 
   echo "[4/4] Installing Web Dashboard..."
-  bash /opt/birddog/bdm/bdm_web_setup.sh
+  bash /opt/birddog/bdm/bdm_web_setup.sh "$HOSTNAME_INPUT"
 
 
 elif [[ $HOSTNAME_INPUT == bdc-* ]]; then
@@ -55,7 +55,7 @@ elif [[ $HOSTNAME_INPUT == bdc-* ]]; then
   echo "Detected BDC node"
   
   echo "[1/1] Running BDC setup..."
-  bash /opt/birddog/bdc/bdc_fresh_install_setup.sh
+  bash /opt/birddog/bdc/bdc_fresh_install_setup.sh "$HOSTNAME_INPUT"
 
 else
 
