@@ -23,8 +23,8 @@ while true; do
         echo ""
         echo "Invalid hostname format."
         echo "Expected examples:"
-        echo "  bdm-01
-  bdc-01"
+        echo "  bdm-01"
+        echo "  bdc-01"
         echo ""
         continue
     fi
@@ -61,9 +61,9 @@ fi
 echo "Detected $ROLE node"
 echo ""
 
-# ---------------------------
+# --------------------------------------------------
 # BDM INSTALL
-# ---------------------------
+# --------------------------------------------------
 
 if [[ "$ROLE" == "BDM" ]]; then
 
@@ -83,24 +83,29 @@ if [[ "$ROLE" == "BDM" ]]; then
     echo ""
     sudo bash /opt/birddog/bdm/bdm_web_setup.sh "$HOSTNAME_INPUT"
 
-# ---------------------------
-# BDC INSTALL
-# ---------------------------
+    echo "[5/5] Configuring Mesh Network..."
+    echo ""
+    sudo bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
 
-elif [[ "$ROLE" == "BDC" ]]; then
+fi
+
+
+# --------------------------------------------------
+# BDC INSTALL
+# --------------------------------------------------
+
+if [[ "$ROLE" == "BDC" ]]; then
 
     echo "[1/2] Running BDC setup..."
     echo ""
     sudo bash /opt/birddog/bdc/bdc_fresh_install_setup.sh "$HOSTNAME_INPUT"
 
+    echo "[2/2] Configuring Mesh Network..."
+    echo ""
+    sudo bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
+
 fi
 
-
-echo ""
-echo "[5/5] Configuring Mesh Network..."
-echo ""
-
-sudo bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
 
 echo ""
 echo "====================================="
