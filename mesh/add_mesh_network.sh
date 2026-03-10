@@ -38,16 +38,15 @@ echo "Mesh adapter detected."
 echo "Configuring mesh interface..."
 
 ip link set wlan1 down || true
-iw dev wlan1 set type mp
-ip link set wlan1 up
+iw dev wlan1 set type mp || true
+ip link set wlan1 up || true
 
 echo "Joining mesh network..."
 
-iw dev wlan1 mesh join birddog-mesh
+iw dev wlan1 mesh join birddog-mesh || true
 
 echo "Mesh joined."
 
-NODE_NUM=$(echo "$HOSTNAME_INPUT" | grep -oE '[0-9]+$')
 MESH_IP="10.10.20.$((NODE_NUM*10))"
 
 echo "Mesh IP will be $MESH_IP"
@@ -85,7 +84,7 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable birddog-mesh
+systemctl enable birddog-mesh || true
 
 echo ""
 echo "====================================="
