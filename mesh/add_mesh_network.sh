@@ -78,7 +78,6 @@ cat > /usr/local/bin/birddog-mesh-join.sh <<EOF
 LOG="/opt/birddog/mesh/mesh_runtime.log"
 
 mkdir -p /opt/birddog/mesh
-
 exec >> \$LOG 2>&1
 
 echo "================================="
@@ -117,14 +116,31 @@ iw dev wlan1 mesh join birddog-mesh
 echo "Assigning IP $MESH_IP"
 ip addr add $MESH_IP/24 dev wlan1 2>/dev/null || true
 
-echo "Final interface state:"
-iw dev wlan1 info
-ip addr show wlan1
+echo "Mesh interface ready"
 
-echo "Mesh peers:"
-iw dev wlan1 station dump
+#################################################
+# MESH SELF-HEAL LOOP
+#################################################
 
-echo "Mesh runtime complete"
+while true
+do
+    PEERS=\$(iw dev wlan1 station dump | grep Station | wc -l)
+
+    echo "Peer count: \$PEERS"
+
+    if [ "\$PEERS" -eq 0 ]; then
+        echo "No mesh peers detected — attempting rejoin..."
+
+        iw dev wlan1 mesh leave || true
+        sleep 2
+        iw dev wlan1 mesh join birddog-mesh || true
+
+        echo "Rejoin attempted"
+    fi
+
+    sleep 30
+done
+
 EOF
 
 chmod +x /usr/local/bin/birddog-mesh-join.sh
@@ -140,9 +156,10 @@ Description=BirdDog Mesh Join
 After=multi-user.target
 
 [Service]
-Type=oneshot
+Type=simple
 ExecStart=/usr/local/bin/birddog-mesh-join.sh
-RemainAfterExit=yes
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
@@ -159,10 +176,6 @@ systemctl enable birddog-mesh
 echo "Restarting mesh service..."
 
 systemctl restart birddog-mesh
-
-echo ""
-echo "Service status:"
-systemctl status birddog-mesh || true
 
 echo ""
 echo "Installing BirdDog mesh status command..."
@@ -182,6 +195,12 @@ echo "BirdDog Mesh Status"
 echo "Node: $(hostname)"
 echo "Time: $(date)"
 echo "================================="
+
+if ! ip link show wlan1 >/dev/null 2>&1; then
+    echo ""
+    echo "Mesh interface wlan1 not present."
+    exit 0
+fi
 
 echo ""
 echo "Interface Type:"
@@ -212,8 +231,6 @@ echo "================================="
 EOF
 
 chmod +x /usr/local/bin/mesh
-
-echo "Mesh command installed: mesh status"
 
 echo ""
 echo "====================================="
