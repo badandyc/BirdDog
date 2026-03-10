@@ -77,6 +77,7 @@ ip link set wlan1 up >> \$LOG 2>&1
 sleep 2
 
 iw dev wlan1 mesh join birddog-mesh >> \$LOG 2>&1 || true
+
 ip addr add $MESH_IP/24 dev wlan1 >> \$LOG 2>&1 || true
 
 echo "Interface state:" >> \$LOG
