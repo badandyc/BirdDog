@@ -7,7 +7,7 @@ echo "[1/12] Installing required packages (if missing)..."
 
 #sudo apt update
 
-for pkg in ffmpeg rpicam-apps avahi-daemon nginx hostapd dnsmasq git; do
+for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git; do
     if dpkg -s "$pkg" >/dev/null 2>&1; then
         echo " - $pkg already installed"
     else
