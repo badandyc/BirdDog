@@ -7,23 +7,33 @@ echo "BirdDog Master Bootstrap"
 echo "====================================="
 echo ""
 
-read -p "Enter hostname (bdm-01, bdc-01, etc): " HOSTNAME_INPUT
+# Hostname input loop
+while true; do
 
-if [[ -z "$HOSTNAME_INPUT" ]]; then
-    echo "Hostname cannot be empty."
-    exit 1
-fi
+    read -p "Enter hostname (bdm-01, bdc-01, etc): " HOSTNAME_INPUT
 
-# Validate hostname format
-if [[ ! "$HOSTNAME_INPUT" =~ ^bd[mc]-[0-9]{2}$ ]]; then
-    echo ""
-    echo "Invalid hostname format."
-    echo "Expected examples:"
-    echo "  bdm-01"
-    echo "  bdc-01"
-    echo ""
-    exit 1
-fi
+    if [[ -z "$HOSTNAME_INPUT" ]]; then
+        echo ""
+        echo "Hostname cannot be empty."
+        echo ""
+        continue
+    fi
+
+    if [[ ! "$HOSTNAME_INPUT" =~ ^bd[mc]-[0-9]{2}$ ]]; then
+        echo ""
+        echo "Invalid hostname format."
+        echo "Expected examples:"
+        echo "  bdm-01"
+        echo "  bdc-01"
+        echo ""
+        continue
+    fi
+
+    # Valid hostname
+    break
+
+done
+
 
 echo ""
 echo "Setting hostname to $HOSTNAME_INPUT"
@@ -50,10 +60,9 @@ else
 fi
 
 echo "Detected $ROLE node"
-
 echo ""
 
-# Run appropriate installer
+# Run installer
 if [[ "$ROLE" == "BDM" ]]; then
 
     echo "[1/2] Running BDM setup..."
