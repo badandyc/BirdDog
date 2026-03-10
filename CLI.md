@@ -1,4 +1,5 @@
 sudo nano /usr/local/bin/birddog
+
 #!/bin/bash
 
 show_help() {
@@ -8,7 +9,7 @@ echo "================================="
 echo "BirdDog System Command"
 echo "================================="
 echo ""
-echo "birddog install    → run golden installer"
+echo "birddog image      → run golden image creator"
 echo "birddog update     → update scripts from GitHub"
 echo "birddog status     → show system health"
 echo "birddog restart    → restart BirdDog services"
