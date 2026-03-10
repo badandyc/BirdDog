@@ -23,13 +23,12 @@ while true; do
         echo ""
         echo "Invalid hostname format."
         echo "Expected examples:"
-        echo "  bdm-01"
-        echo "  bdc-01"
+        echo "  bdm-01
+  bdc-01"
         echo ""
         continue
     fi
 
-    # Valid hostname
     break
 
 done
@@ -62,26 +61,43 @@ fi
 echo "Detected $ROLE node"
 echo ""
 
-# Run installer
+# ---------------------------
+# BDM INSTALL
+# ---------------------------
+
 if [[ "$ROLE" == "BDM" ]]; then
 
-    echo "[1/2] Running BDM setup..."
+    echo "[1/5] Running BDM initial setup..."
     echo ""
-
     sudo bash /opt/birddog/bdm/bdm_initial_setup.sh "$HOSTNAME_INPUT"
+
+    echo "[2/5] Configuring BDM Access Point..."
+    echo ""
+    sudo bash /opt/birddog/bdm/bdm_AP_setup.sh "$HOSTNAME_INPUT"
+
+    echo "[3/5] Installing MediaMTX streaming server..."
+    echo ""
+    sudo bash /opt/birddog/bdm/bdm_mediamtx_setup.sh "$HOSTNAME_INPUT"
+
+    echo "[4/5] Installing BirdDog web interface..."
+    echo ""
+    sudo bash /opt/birddog/bdm/bdm_web_setup.sh "$HOSTNAME_INPUT"
+
+# ---------------------------
+# BDC INSTALL
+# ---------------------------
 
 elif [[ "$ROLE" == "BDC" ]]; then
 
     echo "[1/2] Running BDC setup..."
     echo ""
-
     sudo bash /opt/birddog/bdc/bdc_fresh_install_setup.sh "$HOSTNAME_INPUT"
 
 fi
 
 
 echo ""
-echo "[2/2] Configuring Mesh Network..."
+echo "[5/5] Configuring Mesh Network..."
 echo ""
 
 sudo bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
