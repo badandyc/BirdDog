@@ -1,10 +1,14 @@
 #!/bin/bash
 set -e
 
+mkdir -p /opt/birddog
+
 LOG="/opt/birddog/install_ap.log"
 exec > >(tee -a "$LOG") 2>&1
 
-echo "=== BirdDog AP Setup ==="
+echo "================================="
+echo "BirdDog AP Setup"
+echo "================================="
 date
 
 if [ "$EUID" -ne 0 ]; then
@@ -17,6 +21,7 @@ AP_IP="10.10.10.1/24"
 SSID="BirdDog"
 PASSPHRASE="StrongPass123"
 
+echo ""
 echo "=== Waiting for AP adapter (${AP_IF}) ==="
 
 until ip link show ${AP_IF} >/dev/null 2>&1; do
@@ -27,19 +32,23 @@ done
 echo "${AP_IF} detected"
 
 
+echo ""
 echo "=== Unblocking WiFi ==="
 rfkill unblock wifi || true
 
 
+echo ""
 echo "=== Set regulatory domain ==="
 iw reg set US || true
 
 
+echo ""
 echo "=== Disable NetworkManager (appliance mode) ==="
 systemctl stop NetworkManager 2>/dev/null || true
 systemctl disable NetworkManager 2>/dev/null || true
 
 
+echo ""
 echo "=== Enable systemd-networkd ==="
 systemctl enable systemd-networkd
 systemctl start systemd-networkd
@@ -48,6 +57,7 @@ systemctl start systemd-networkd
 mkdir -p /etc/systemd/network
 
 
+echo ""
 echo "=== Configure eth0 (DHCP for LAN access) ==="
 
 cat > /etc/systemd/network/eth0.network <<EOF
@@ -59,6 +69,7 @@ DHCP=yes
 EOF
 
 
+echo ""
 echo "=== Configure ${AP_IF} (Static AP IP) ==="
 
 cat > /etc/systemd/network/${AP_IF}.network <<EOF
@@ -71,6 +82,7 @@ ConfigureWithoutCarrier=yes
 EOF
 
 
+echo ""
 echo "=== Configure hostapd ==="
 
 cat > /etc/hostapd/hostapd.conf <<EOF
@@ -79,8 +91,11 @@ driver=nl80211
 ssid=${SSID}
 hw_mode=g
 channel=6
+country_code=US
+ieee80211n=1
 wmm_enabled=1
 auth_algs=1
+
 wpa=2
 wpa_passphrase=${PASSPHRASE}
 wpa_key_mgmt=WPA-PSK
@@ -99,6 +114,7 @@ systemctl unmask hostapd || true
 systemctl enable hostapd
 
 
+echo ""
 echo "=== Configure hostapd startup ordering ==="
 
 mkdir -p /etc/systemd/system/hostapd.service.d
@@ -109,6 +125,7 @@ After=systemd-networkd.service
 EOF
 
 
+echo ""
 echo "=== Configure dnsmasq ==="
 
 systemctl stop dnsmasq || true
@@ -123,6 +140,7 @@ EOF
 systemctl enable dnsmasq
 
 
+echo ""
 echo "=== Ensure WiFi unblocked on boot ==="
 
 cat > /etc/systemd/system/hostapd.service.d/rfkill.conf <<EOF
@@ -131,6 +149,7 @@ ExecStartPre=/usr/sbin/rfkill unblock wifi
 EOF
 
 
+echo ""
 echo "=== Disable WiFi power save ==="
 iw dev ${AP_IF} set power_save off || true
 
@@ -138,6 +157,7 @@ iw dev ${AP_IF} set power_save off || true
 systemctl daemon-reload
 
 
+echo ""
 echo "=== Restarting services ==="
 
 systemctl restart systemd-networkd
@@ -145,30 +165,40 @@ systemctl restart hostapd
 systemctl restart dnsmasq
 
 
+echo ""
 echo "=== Verification ==="
 
 echo "--- Interface status ---"
 ip addr show ${AP_IF}
 
+echo ""
 echo "--- hostapd status ---"
 systemctl status hostapd --no-pager
 
+echo ""
 echo "--- dnsmasq status ---"
 systemctl status dnsmasq --no-pager
 
+echo ""
 echo "--- Listening DHCP port ---"
 ss -lntup | grep 67 || true
 
+echo ""
 echo "--- WiFi interface info ---"
 iw dev ${AP_IF} info || true
 
 
-echo "=== DONE ==="
+echo ""
+echo "================================="
+echo "BirdDog AP Setup Complete"
+echo "================================="
 
+echo ""
 echo "Management:"
 echo "  eth0  → DHCP"
 echo "  wlan0 → optional SSH WiFi"
 
+echo ""
 echo "BirdDog Networks:"
 echo "  wlan1 → mesh backbone"
 echo "  wlan2 → AP network (${AP_IP})"
