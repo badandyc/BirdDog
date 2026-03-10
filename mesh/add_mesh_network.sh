@@ -82,6 +82,7 @@ EOF
 
 systemctl daemon-reload
 systemctl enable birddog-mesh
+systemctl start birddog-mesh
 
 echo ""
 echo "====================================="
