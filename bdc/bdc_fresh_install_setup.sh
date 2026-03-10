@@ -133,4 +133,6 @@ systemctl daemon-reload
 systemctl enable birddog-stream.service
 
 echo "=== BDC Installation Complete ==="
+echo "Node: $NEW_HOSTNAME"
 echo "Install log saved to: $LOG"
+echo "Please reboot $NEW_HOSTNAME now"
