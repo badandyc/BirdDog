@@ -1,10 +1,14 @@
 #!/bin/bash
 set -e
 
+mkdir -p /opt/birddog
+
 LOG="/opt/birddog/install_bdm_bootstrap.log"
 exec > >(tee -a "$LOG") 2>&1
 
-echo "=== BirdDog BDM Bootstrap ==="
+echo "================================="
+echo "BirdDog BDM Bootstrap"
+echo "================================="
 date
 
 if [ "$EUID" -ne 0 ]; then
@@ -21,6 +25,14 @@ if [[ -z "$NEW_HOSTNAME" ]]; then
 fi
 
 
+if [[ ! "$NEW_HOSTNAME" =~ ^bdm-[0-9]{2}$ ]]; then
+  echo "ERROR: Invalid hostname format."
+  echo "Expected: bdm-01, bdm-02, etc."
+  exit 1
+fi
+
+
+echo ""
 echo "=== Disable cloud-init if present ==="
 
 if [ -d /etc/cloud ]; then
@@ -29,9 +41,13 @@ if [ -d /etc/cloud ]; then
 fi
 
 
+echo ""
 echo "=== Setting hostname ==="
 
 echo "Hostname received: $NEW_HOSTNAME"
+
+hostnamectl set-hostname "$NEW_HOSTNAME"
+
 
 echo "$NEW_HOSTNAME" > /etc/hostname
 
@@ -44,6 +60,7 @@ fi
 hostname "$NEW_HOSTNAME"
 
 
+echo ""
 echo "=== Resetting Avahi state ==="
 
 rm -rf /var/lib/avahi-daemon/* || true
@@ -52,21 +69,27 @@ systemctl enable avahi-daemon
 systemctl restart avahi-daemon
 
 
+echo ""
 echo "=== Verification ==="
 
 echo "--- Hostname ---"
 hostname
 
+echo ""
 echo "--- Hosts file ---"
 grep 127.0.1.1 /etc/hosts
 
+echo ""
 echo "--- Avahi status ---"
 systemctl status avahi-daemon --no-pager
 
 
-echo "=== BDM Bootstrap complete ==="
-echo "Hostname: $NEW_HOSTNAME"
-
 echo ""
+echo "================================="
+echo "BDM Bootstrap Complete"
+echo "================================="
+echo "Hostname: $NEW_HOSTNAME"
+echo ""
+
 echo "Install log saved to:"
 echo "$LOG"
