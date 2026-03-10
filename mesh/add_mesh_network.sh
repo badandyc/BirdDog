@@ -135,13 +135,14 @@ echo $MAC
 mesh_table() {
 
 echo ""
-echo "Node        IP              Signal      Metric"
-echo "------------------------------------------------"
+echo "Node        IP              Signal      Rate       Metric"
+echo "--------------------------------------------------------------"
 
-SELF=$(hostname)
-SELF_IP=$(ip -4 addr show wlan1 | grep inet | awk '{print $2}')
+SELF_NODE=$(hostname)
 
-printf "%-12s %-15s %-10s %-10s\n" "$SELF" "$SELF_IP" "self" "-"
+SELF_IP=$(ip -4 addr show wlan1 | grep inet | awk '{print $2}' | cut -d/ -f1)
+
+printf "%-12s %-15s %-10s %-10s %-10s\n" "$SELF_NODE" "$SELF_IP" "self" "-" "-"
 
 iw dev wlan1 station dump | grep Station | awk '{print $2}' | while read MAC
 do
@@ -152,9 +153,11 @@ IP=$(ip neigh | grep $MAC | awk '{print $1}' | head -n1)
 
 SIGNAL=$(iw dev wlan1 station dump | grep -A20 $MAC | grep signal: | awk '{print $2}' | head -n1)
 
+RATE=$(iw dev wlan1 station dump | grep -A20 $MAC | grep bitrate | awk '{print $3}' | head -n1)
+
 METRIC=$(iw dev wlan1 station dump | grep -A20 $MAC | grep metric | awk '{print $4}' | head -n1)
 
-printf "%-12s %-15s %-10s %-10s\n" "$HOST" "$IP" "$SIGNAL dBm" "$METRIC"
+printf "%-12s %-15s %-10s %-10s %-10s\n" "$HOST" "$IP" "$SIGNAL dBm" "$RATE" "$METRIC"
 
 done
 
@@ -200,7 +203,7 @@ echo "Time: $(date)"
 echo "================================="
 
 TYPE=$(iw dev wlan1 info 2>/dev/null | grep type | awk '{print $2}')
-IP=$(ip -4 addr show wlan1 2>/dev/null | grep inet | awk '{print $2}')
+IP=$(ip -4 addr show wlan1 2>/dev/null | grep inet | awk '{print $2}' | cut -d/ -f1)
 PEERS=$(iw dev wlan1 station dump | grep Station | wc -l)
 
 echo "Interface Type : $TYPE"
@@ -223,13 +226,17 @@ do
 HOST=$(resolve_peer $MAC)
 
 SIGNAL=$(iw dev wlan1 station dump | grep -A20 $MAC | grep signal: | awk '{print $2}' | head -n1)
+
 RATE=$(iw dev wlan1 station dump | grep -A20 $MAC | grep bitrate | awk '{print $3}' | head -n1)
+
+METRIC=$(iw dev wlan1 station dump | grep -A20 $MAC | grep metric | awk '{print $4}' | head -n1)
 
 echo ""
 echo "Peer: $HOST"
 echo "MAC: $MAC"
 echo "Signal: $SIGNAL dBm"
 echo "TX Rate: $RATE"
+echo "Link Metric: $METRIC"
 
 done
 
