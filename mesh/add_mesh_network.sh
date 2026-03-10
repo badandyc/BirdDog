@@ -39,49 +39,28 @@ MESH_IP="10.10.20.$((NODE_NUM*10))"
 
 echo "Mesh IP will be $MESH_IP"
 
-mkdir -p /etc/systemd/network
-
-cat > /etc/systemd/network/30-mesh.network <<EOF
-[Match]
-Name=wlan1
-
-[Network]
-Address=${MESH_IP}/24
-ConfigureWithoutCarrier=yes
-EOF
-
-systemctl enable systemd-networkd
-systemctl restart systemd-networkd
-
 echo "Installing mesh join script..."
 
-cat > /usr/local/bin/birddog-mesh-join.sh <<'EOF'
+cat > /usr/local/bin/birddog-mesh-join.sh <<EOF
 #!/bin/bash
 set -e
 
-echo "BirdDog mesh join starting..."
+echo "BirdDog mesh startup..."
 
-# Wait for interface to appear
+# wait for wlan1
 until ip link show wlan1 >/dev/null 2>&1; do
     sleep 1
 done
-
-# Wait for networkd to finish configuring
-sleep 5
-
-echo "Configuring mesh mode..."
 
 ip link set wlan1 down || true
 iw dev wlan1 set type mp
 ip link set wlan1 up
 
-sleep 2
-
-echo "Joining mesh..."
+sleep 1
 
 iw dev wlan1 mesh join birddog-mesh || true
 
-echo "Mesh join attempted."
+ip addr add ${MESH_IP}/24 dev wlan1 || true
 EOF
 
 chmod +x /usr/local/bin/birddog-mesh-join.sh
@@ -91,8 +70,6 @@ echo "Installing mesh systemd service..."
 cat > /etc/systemd/system/birddog-mesh.service <<EOF
 [Unit]
 Description=BirdDog Mesh Join
-After=network.target systemd-networkd.service
-Wants=network.target
 
 [Service]
 Type=oneshot
@@ -116,6 +93,7 @@ echo "Mesh ID: birddog-mesh"
 echo "====================================="
 
 echo "Mesh will automatically start at boot."
+
 echo "Verify peers with:"
 echo "iw dev wlan1 station dump"
 
