@@ -1,43 +1,58 @@
 #!/bin/bash
 set -e
 
-if [ "$EUID" -ne 0 ]; then
-  echo "Run as root: sudo bash mesh_setup.sh"
+echo "====================================="
+echo "BirdDog Mesh Network Setup"
+echo "====================================="
+
+HOSTNAME_INPUT="$1"
+
+if [[ -z "$HOSTNAME_INPUT" ]]; then
+  echo "Hostname not provided"
   exit 1
 fi
 
-MESH_IF="wlan1"
-MESH_ID="birddog"
-MESH_CHANNEL="1"
+NODE_NUM=$(echo "$HOSTNAME_INPUT" | grep -oE '[0-9]+$')
 
-echo "=== Unblocking WiFi ==="
-rfkill unblock wifi || true
+if [[ -z "$NODE_NUM" ]]; then
+  echo "Hostname must end in number"
+  exit 1
+fi
 
-echo "=== Set regulatory domain ==="
-iw reg set US || true
+echo ""
+echo "Plug in the USB mesh WiFi adapter now."
+echo "Expected interface: wlan1"
+echo ""
 
-echo "=== Bring interface down ==="
-ip link set ${MESH_IF} down
+read -p "Press ENTER when adapter is inserted..."
 
-echo "=== Set mesh interface type ==="
-iw dev ${MESH_IF} set type mesh
+echo "Waiting for wlan1..."
 
-echo "=== Bring interface up ==="
-ip link set ${MESH_IF} up
+until ip link show wlan1 >/dev/null 2>&1; do
+  echo "Mesh adapter not detected yet..."
+  sleep 2
+done
 
-echo "=== Join mesh network ==="
-iw dev ${MESH_IF} mesh join ${MESH_ID} freq 2412
+echo "Mesh adapter detected."
 
-echo "=== Disable WiFi power save ==="
-iw dev ${MESH_IF} set power_save off || true
+MESH_IP="10.10.20.$((NODE_NUM*10))"
 
-echo "=== Mesh interface status ==="
-iw dev ${MESH_IF} info
+echo "Mesh IP will be $MESH_IP"
 
-echo "=== Mesh peer table (will populate when other nodes join) ==="
-iw dev ${MESH_IF} station dump
+mkdir -p /etc/systemd/network
 
-echo "=== Mesh setup complete ==="
-echo "Mesh ID: ${MESH_ID}"
-echo "Interface: ${MESH_IF}"
-echo "Channel: ${MESH_CHANNEL}"
+cat > /etc/systemd/network/30-mesh.network <<EOF
+[Match]
+Name=wlan1
+
+[Network]
+Address=${MESH_IP}/24
+EOF
+
+systemctl enable systemd-networkd
+systemctl restart systemd-networkd
+
+echo ""
+echo "Mesh network configured."
+echo "Interface: wlan1"
+echo "IP: $MESH_IP"
