@@ -12,6 +12,15 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+
+NEW_HOSTNAME="$1"
+
+if [[ -z "$NEW_HOSTNAME" ]]; then
+  echo "ERROR: Hostname argument missing."
+  exit 1
+fi
+
+
 echo "=== Disable cloud-init if present ==="
 
 if [ -d /etc/cloud ]; then
@@ -19,16 +28,10 @@ if [ -d /etc/cloud ]; then
   touch /etc/cloud/cloud-init.disabled
 fi
 
-echo "=== Prompt for hostname ==="
 
-read -p "Enter new hostname (e.g. bdm-01): " NEW_HOSTNAME
+echo "=== Setting hostname ==="
 
-if [[ -z "$NEW_HOSTNAME" ]]; then
-  echo "Hostname cannot be empty."
-  exit 1
-fi
-
-echo "Setting hostname to $NEW_HOSTNAME"
+echo "Hostname received: $NEW_HOSTNAME"
 
 echo "$NEW_HOSTNAME" > /etc/hostname
 
@@ -40,6 +43,7 @@ fi
 
 hostname "$NEW_HOSTNAME"
 
+
 echo "=== Resetting Avahi state ==="
 
 rm -rf /var/lib/avahi-daemon/* || true
@@ -47,34 +51,6 @@ rm -rf /var/lib/avahi-daemon/* || true
 systemctl enable avahi-daemon
 systemctl restart avahi-daemon
 
-echo "=== Determining mesh IP ==="
-
-HOST=$(hostname)
-
-if [[ $HOST =~ bdm-([0-9]+) ]]; then
-  ID=${BASH_REMATCH[1]}
-  MESH_IP="10.10.20.$ID"
-else
-  echo "ERROR: Hostname must follow pattern bdm-XX"
-  exit 1
-fi
-
-echo "Mesh IP will be $MESH_IP"
-
-echo "=== Configuring mesh interface ==="
-
-mkdir -p /etc/systemd/network
-
-cat > /etc/systemd/network/30-mesh.network <<EOF
-[Match]
-Name=wlan1
-
-[Network]
-Address=${MESH_IP}/24
-EOF
-
-systemctl enable systemd-networkd
-systemctl restart systemd-networkd
 
 echo "=== Verification ==="
 
@@ -87,14 +63,10 @@ grep 127.0.1.1 /etc/hosts
 echo "--- Avahi status ---"
 systemctl status avahi-daemon --no-pager
 
-echo "--- Mesh interface config ---"
-ip addr show wlan1 || true
 
-echo "--- systemd-networkd status ---"
-systemctl status systemd-networkd --no-pager
-
-echo "=== Bootstrap complete ==="
+echo "=== BDM Bootstrap complete ==="
 echo "Hostname: $NEW_HOSTNAME"
-echo "Mesh IP: $MESH_IP"
 
-echo "Install log saved to: $LOG"
+echo ""
+echo "Install log saved to:"
+echo "$LOG"
