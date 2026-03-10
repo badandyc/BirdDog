@@ -39,28 +39,54 @@ MESH_IP="10.10.20.$((NODE_NUM*10))"
 
 echo "Mesh IP will be $MESH_IP"
 
-echo "Installing mesh join script..."
+mkdir -p /opt/birddog/mesh
+
+echo "Installing mesh startup script..."
 
 cat > /usr/local/bin/birddog-mesh-join.sh <<EOF
 #!/bin/bash
 set -e
 
-echo "BirdDog mesh startup..."
+LOG="/opt/birddog/mesh/mesh.log"
 
-# wait for wlan1
+echo "=================================" >> \$LOG
+echo "BirdDog mesh startup \$(date)" >> \$LOG
+echo "Hostname: \$(hostname)" >> \$LOG
+
+echo "Waiting for wlan1..." >> \$LOG
+
 until ip link show wlan1 >/dev/null 2>&1; do
     sleep 1
 done
 
-ip link set wlan1 down || true
-iw dev wlan1 set type mp
-ip link set wlan1 up
+echo "Interface detected" >> \$LOG
+
+sleep 2
+
+echo "Resetting interface..." >> \$LOG
+ip link set wlan1 down >> \$LOG 2>&1 || true
+
+echo "Setting mesh mode..." >> \$LOG
+iw dev wlan1 set type mp >> \$LOG 2>&1
+
+echo "Bringing interface up..." >> \$LOG
+ip link set wlan1 up >> \$LOG 2>&1
 
 sleep 1
 
-iw dev wlan1 mesh join birddog-mesh || true
+echo "Joining mesh..." >> \$LOG
+iw dev wlan1 mesh join birddog-mesh >> \$LOG 2>&1
 
-ip addr add ${MESH_IP}/24 dev wlan1 || true
+echo "Assigning IP ${MESH_IP}" >> \$LOG
+ip addr add ${MESH_IP}/24 dev wlan1 >> \$LOG 2>&1 || true
+
+echo "Interface state:" >> \$LOG
+iw dev wlan1 info >> \$LOG 2>&1
+
+echo "Mesh peers:" >> \$LOG
+iw dev wlan1 station dump >> \$LOG 2>&1
+
+echo "Mesh startup complete" >> \$LOG
 EOF
 
 chmod +x /usr/local/bin/birddog-mesh-join.sh
@@ -70,6 +96,7 @@ echo "Installing mesh systemd service..."
 cat > /etc/systemd/system/birddog-mesh.service <<EOF
 [Unit]
 Description=BirdDog Mesh Join
+After=multi-user.target
 
 [Service]
 Type=oneshot
@@ -91,12 +118,13 @@ echo "Node: $HOSTNAME_INPUT"
 echo "Interface: wlan1"
 echo "IP: $MESH_IP"
 echo "Mesh ID: birddog-mesh"
+echo "Log: /opt/birddog/mesh/mesh.log"
 echo "====================================="
 
-echo "Mesh will automatically start at boot."
-
-echo "Verify peers with:"
+echo ""
+echo "Verify mesh with:"
 echo "iw dev wlan1 station dump"
+echo "ping 10.10.20.X"
 
 echo ""
-echo "Please reboot $HOSTNAME_INPUT now"
+echo "Reboot when ready to test persistence."
