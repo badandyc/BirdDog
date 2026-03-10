@@ -35,6 +35,19 @@ done
 
 echo "Mesh adapter detected."
 
+echo "Configuring mesh interface..."
+
+ip link set wlan1 down || true
+iw dev wlan1 set type mp
+ip link set wlan1 up
+
+echo "Joining mesh network..."
+
+iw dev wlan1 mesh join birddog-mesh
+
+echo "Mesh joined."
+
+NODE_NUM=$(echo "$HOSTNAME_INPUT" | grep -oE '[0-9]+$')
 MESH_IP="10.10.20.$((NODE_NUM*10))"
 
 echo "Mesh IP will be $MESH_IP"
@@ -53,6 +66,13 @@ systemctl enable systemd-networkd
 systemctl restart systemd-networkd
 
 echo ""
-echo "Mesh network configured."
+echo "====================================="
+echo "Mesh network configured"
+echo "Node: $HOSTNAME_INPUT"
 echo "Interface: wlan1"
 echo "IP: $MESH_IP"
+echo "Mesh ID: birddog-mesh"
+echo "====================================="
+
+echo "You can verify peers with:"
+echo "iw dev wlan1 station dump"
