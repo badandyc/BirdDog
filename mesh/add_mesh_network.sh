@@ -54,7 +54,6 @@ if ! grep -q "denyinterfaces wlan1" /etc/dhcpcd.conf; then
 fi
 
 systemctl restart dhcpcd || true
-
 systemctl stop wpa_supplicant@wlan1 2>/dev/null || true
 systemctl disable wpa_supplicant@wlan1 2>/dev/null || true
 
@@ -79,8 +78,6 @@ until ip link show wlan1 >/dev/null 2>&1; do
     sleep 2
 done
 
-echo "Configuring mesh interface..."
-
 ip link set wlan1 down || true
 iw dev wlan1 set type mp
 ip link set wlan1 up
@@ -93,9 +90,9 @@ ip addr add $MESH_IP/24 dev wlan1 2>/dev/null || true
 
 echo "Mesh joined"
 
-################################################
+#########################################
 # SELF HEAL LOOP
-################################################
+#########################################
 
 while true
 do
@@ -154,16 +151,37 @@ MAC="$1"
 IP=$(ip neigh | grep "$MAC" | awk '{print $1}')
 
 if [[ -n "$IP" ]]; then
-    HOST=$(getent hosts "$IP" | awk '{print $2}' | cut -d'.' -f1)
-    if [[ -n "$HOST" ]]; then
-        echo "$HOST"
-        return
-    fi
+HOST=$(getent hosts "$IP" | awk '{print $2}' | cut -d'.' -f1)
+[ -n "$HOST" ] && echo "$HOST" && return
 fi
 
 echo "$MAC"
 
 }
+
+show_help() {
+
+echo ""
+echo "================================="
+echo "BirdDog Mesh Command"
+echo "================================="
+echo ""
+echo "mesh status   → mesh health overview"
+echo "mesh peers    → RF metrics for peers"
+echo "mesh map      → direct neighbors"
+echo "mesh scan     → discovered nodes"
+echo "mesh graph    → mesh topology"
+echo "mesh help     → this menu"
+echo ""
+echo "================================="
+echo ""
+
+}
+
+if [[ -z "$CMD" ]]; then
+show_help
+exit
+fi
 
 ###################################
 # STATUS
@@ -177,20 +195,19 @@ echo "Node: $(hostname)"
 echo "Time: $(date)"
 echo "================================="
 
-iw dev wlan1 info | grep type
+TYPE=$(iw dev wlan1 info 2>/dev/null | grep type | awk '{print $2}')
+IP=$(ip -4 addr show wlan1 2>/dev/null | awk '/inet / {print $2}')
+PEERS=$(iw dev wlan1 station dump 2>/dev/null | grep Station | wc -l)
+SIGNAL=$(iw dev wlan1 station dump 2>/dev/null | grep signal | head -1 | awk '{print $2}')
 
-echo ""
-echo "IP Address:"
-ip -4 addr show wlan1 | awk '/inet / {print $2}'
-
-echo ""
-echo "Peer Count:"
-PEERS=$(iw dev wlan1 station dump | grep Station | wc -l)
-echo "$PEERS peers"
+echo "Interface Type : $TYPE"
+echo "Mesh IP        : $IP"
+echo "Peers          : $PEERS"
+echo "Signal         : ${SIGNAL} dBm"
 
 echo ""
 echo "Links:"
-iw dev wlan1 station dump | grep plink
+iw dev wlan1 station dump 2>/dev/null | grep plink
 
 echo "================================="
 
@@ -211,34 +228,17 @@ iw dev wlan1 station dump | while read line
 do
 
 if [[ $line == Station* ]]; then
-
 MAC=$(echo $line | awk '{print $2}')
 NAME=$(resolve_mac "$MAC")
-
 echo ""
 echo "Peer: $NAME"
-
 fi
 
-if [[ $line == *signal:* ]]; then
-echo "Signal:" $(echo $line | awk '{print $2}') "dBm"
-fi
-
-if [[ $line == *tx\ bitrate:* ]]; then
-echo "TX Rate:" $(echo $line | awk '{print $3,$4}')
-fi
-
-if [[ $line == *expected\ throughput:* ]]; then
-echo "Throughput:" $(echo $line | awk '{print $3}')
-fi
-
-if [[ $line == *airtime*metric:* ]]; then
-echo "Link Metric:" $(echo $line | awk '{print $5}')
-fi
-
-if [[ $line == *connected\ time:* ]]; then
-echo "Connected:" $(echo $line | awk '{print $3}') "seconds"
-fi
+[[ $line == *signal:* ]] && echo "Signal:" $(echo $line | awk '{print $2}') "dBm"
+[[ $line == *tx\ bitrate:* ]] && echo "TX Rate:" $(echo $line | awk '{print $3,$4}')
+[[ $line == *expected\ throughput:* ]] && echo "Throughput:" $(echo $line | awk '{print $3}')
+[[ $line == *airtime*metric:* ]] && echo "Link Metric:" $(echo $line | awk '{print $5}')
+[[ $line == *connected\ time:* ]] && echo "Connected:" $(echo $line | awk '{print $3}') "seconds"
 
 done
 
@@ -262,11 +262,8 @@ echo "================================="
 
 iw dev wlan1 station dump | awk '/Station/ {print $2}' | while read MAC
 do
-
 NAME=$(resolve_mac "$MAC")
-
 echo "$LOCAL  <---->  $NAME"
-
 done
 
 echo "================================="
@@ -292,9 +289,7 @@ MAC=$(echo $line | awk '{print $5}')
 
 HOST=$(getent hosts "$IP" | awk '{print $2}' | cut -d'.' -f1)
 
-if [[ -z "$HOST" ]]; then
-HOST="$MAC"
-fi
+[ -z "$HOST" ] && HOST="$MAC"
 
 echo "$HOST  ($IP)"
 
@@ -305,11 +300,44 @@ echo "================================="
 exit
 fi
 
-echo "Usage:"
-echo "mesh status"
-echo "mesh peers"
-echo "mesh map"
-echo "mesh scan"
+###################################
+# GRAPH
+###################################
+
+if [[ "$CMD" == "graph" ]]; then
+
+LOCAL=$(hostname)
+
+echo "================================="
+echo "BirdDog Mesh Graph"
+echo "================================="
+
+echo "$LOCAL"
+echo "│"
+
+iw dev wlan1 station dump | awk '/Station/ {print $2}' | while read MAC
+do
+NAME=$(resolve_mac "$MAC")
+echo "├── $NAME"
+done
+
+echo ""
+echo "================================="
+
+exit
+fi
+
+###################################
+# HELP
+###################################
+
+if [[ "$CMD" == "help" ]]; then
+show_help
+exit
+fi
+
+echo "Unknown command: $CMD"
+show_help
 
 EOF
 
@@ -321,9 +349,11 @@ echo "Mesh network install complete"
 echo "Node: $HOSTNAME_INPUT"
 echo "Mesh IP: $MESH_IP"
 echo ""
-echo "Commands:"
+echo "Commands available:"
+echo "mesh"
 echo "mesh status"
 echo "mesh peers"
 echo "mesh map"
 echo "mesh scan"
+echo "mesh graph"
 echo "====================================="
