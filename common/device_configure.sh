@@ -73,6 +73,8 @@ if [[ "$ROLE" == "bdc" ]]; then
         read -p "Keep BDM association? (y/n): " KEEP_BDM
         if [[ "$KEEP_BDM" =~ ^[Yy]$ ]]; then
             REUSE_BDM=1
+        else
+            unset BDM_HOST
         fi
     fi
 
@@ -88,11 +90,15 @@ if [[ "$ROLE" == "bdc" ]]; then
     fi
 
     echo ""
-    echo "[BDC] Running installer..."
+    echo "[BDC] Running setup..."
     bash /opt/birddog/bdc/bdc_fresh_install_setup.sh \
         "$HOSTNAME_INPUT" \
         "$BDM_HOST" \
         "$STREAM_NAME"
+
+    echo ""
+    echo "[BDC] Installing mesh..."
+    bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
 
 # --------------------------------------------------
 # ROLE: BDM
@@ -101,12 +107,15 @@ if [[ "$ROLE" == "bdc" ]]; then
 elif [[ "$ROLE" == "bdm" ]]; then
 
     echo ""
-    echo "[BDM] Running installer..."
+    echo "[BDM] Running setup..."
 
     bash /opt/birddog/bdm/bdm_initial_setup.sh "$HOSTNAME_INPUT"
     bash /opt/birddog/bdm/bdm_AP_setup.sh
     bash /opt/birddog/bdm/bdm_mediamtx_setup.sh
     bash /opt/birddog/bdm/bdm_web_setup.sh
+
+    echo ""
+    echo "[BDM] Installing mesh..."
     bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
 
 else
