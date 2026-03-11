@@ -45,6 +45,9 @@ JOIN_COOLDOWN=15
 SUSPECT_THRESHOLD=15
 RECOVERY_THRESHOLD=40
 
+CONVERGE_START=0
+RECOVERY_START=0
+
 log_state() {
     echo "[mesh] STATE → \$1" >> \$LOG
 }
@@ -109,6 +112,7 @@ do
         log_state "\$STATE"
         normalize_and_join
         STATE="CONVERGING"
+        CONVERGE_START=\$(date +%s)
         log_state "\$STATE"
     fi
 
@@ -135,6 +139,8 @@ do
     if [[ "\$STATE" == "CONVERGING" ]]; then
 
         if [[ "\$PEER_FOUND" -eq 1 ]]; then
+            DURATION=\$((NOW - CONVERGE_START))
+            echo "[mesh] convergence achieved in \${DURATION}s" >> \$LOG
             STATE="STEADY"
             log_state "\$STATE"
         fi
@@ -154,6 +160,7 @@ do
 
         elif (( DELTA > RECOVERY_THRESHOLD )); then
             STATE="RECOVERY"
+            RECOVERY_START=\$(date +%s)
             log_state "\$STATE"
         fi
 
@@ -161,6 +168,7 @@ do
 
         normalize_and_join
         STATE="CONVERGING"
+        CONVERGE_START=\$(date +%s)
         log_state "\$STATE"
     fi
 
@@ -176,7 +184,13 @@ do
         continue
     fi
 
-    # STEADY
+    if [[ "\$STATE" == "STEADY" && \$RECOVERY_START -ne 0 ]]; then
+        DURATION=\$((NOW - RECOVERY_START))
+        echo "[mesh] recovery completed in \${DURATION}s" >> \$LOG
+        RECOVERY_START=0
+    fi
+
+    # STEADY warmer
     for peer in \$(ip neigh show dev wlan1 | awk '{print \$1}')
     do
         ping -c1 -W1 \$peer >/dev/null 2>&1
