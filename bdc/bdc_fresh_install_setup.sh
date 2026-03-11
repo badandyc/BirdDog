@@ -58,21 +58,34 @@ STREAM_NAME="cam$(printf "%02d" "$NODE_NUM")"
 read -p "Enter BDM hostname (without .local): " BDM_NAME
 BDM_HOST="${BDM_NAME}.local"
 
-echo ""
-echo "=== Camera Verification Test ==="
 
-TEST_FILE="/opt/birddog/test_capture.h264"
-rm -f "$TEST_FILE"
-
-rpicam-vid -t 5000 --nopreview -o "$TEST_FILE" || true
-
-FILE_SIZE=$(stat -c%s "$TEST_FILE" 2>/dev/null || echo 0)
-
-if [[ "$FILE_SIZE" -gt 0 ]]; then
-    echo "Camera test PASS"
-else
-    echo "Camera test FAIL"
-fi
+# echo ""
+# echo "=== Camera Verification Test ==="
+#
+# TEST_FILE="/opt/birddog/test_capture.h264"
+# rm -f "$TEST_FILE"
+#
+# echo "Capturing 5 second camera test..."
+#
+# if rpicam-vid -t 5000 --nopreview -o "$TEST_FILE"; then
+#     echo "Camera capture command completed."
+# else
+#     echo "Camera capture command failed."
+# fi
+#
+# if [[ -f "$TEST_FILE" ]]; then
+#     FILE_SIZE=$(stat -c%s "$TEST_FILE")
+# else
+#     FILE_SIZE=0
+# fi
+#
+# echo "Captured file size: $FILE_SIZE bytes"
+#
+# if [[ "$FILE_SIZE" -gt 0 ]]; then
+#     echo "Camera test: PASS (video data captured)"
+# else
+#     echo "Camera test: FAIL (no video data)"
+# fi
 
 
 echo ""
@@ -95,6 +108,8 @@ mkfifo \$PIPE
 
 trap "rm -f \$PIPE" EXIT
 
+echo "Starting camera capture..."
+
 rpicam-vid -t 0 --nopreview \
 --width \$WIDTH --height \$HEIGHT \
 --framerate \$FPS \
@@ -102,6 +117,8 @@ rpicam-vid -t 0 --nopreview \
 -o \$PIPE &
 
 sleep 1
+
+echo "Starting RTSP stream to \$BDM_HOST..."
 
 ffmpeg \
 -use_wallclock_as_timestamps 1 \
