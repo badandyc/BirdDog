@@ -3,7 +3,7 @@ set -e
 
 echo "=== BirdDog Golden Image Creation ==="
 
-echo "[1/12] Installing required packages (if missing)..."
+echo "[1/13] Installing required packages (if missing)..."
 
 sudo apt update
 
@@ -16,33 +16,50 @@ for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git
     fi
 done
 
-echo "[1/12] Package check complete."
+echo "[1/13] Package check complete."
 
 
-echo "[2/12] Creating BirdDog directory structure..."
+echo "[2/13] Configuring sudo policy for birddog..."
+
+SUDO_FILE="/etc/sudoers.d/010_pi-nopasswd"
+
+if [ -f "$SUDO_FILE" ]; then
+    sudo sed -i '/^%birddog /d' "$SUDO_FILE"
+    sudo sed -i '/^birddog /d' "$SUDO_FILE"
+fi
+
+echo "%birddog ALL=(ALL) NOPASSWD: ALL" | sudo tee -a "$SUDO_FILE" >/dev/null
+echo "birddog ALL=(ALL) ALL" | sudo tee -a "$SUDO_FILE" >/dev/null
+
+sudo chmod 440 "$SUDO_FILE"
+
+echo "[2/13] Sudo policy configured."
+
+
+echo "[3/13] Creating BirdDog directory structure..."
 
 sudo mkdir -p /opt/birddog/{bdm,bdc,mesh,common,mediamtx,web,version}
 sudo chmod -R 777 /opt/birddog
 
-echo "[2/12] Directory structure created."
+echo "[3/13] Directory structure created."
 
 
-echo "[3/12] Switching to /opt/birddog..."
+echo "[4/13] Switching to /opt/birddog..."
 cd /opt/birddog
-echo "[3/12] Working directory set."
+echo "[4/13] Working directory set."
 
 
-echo "[4/12] Cleaning previous scripts..."
+echo "[5/13] Cleaning previous scripts..."
 
 rm -f /opt/birddog/bdm/*.sh || true
 rm -f /opt/birddog/bdc/*.sh || true
 rm -f /opt/birddog/mesh/*.sh || true
 rm -f /opt/birddog/common/*.sh || true
 
-echo "[4/12] Cleanup complete."
+echo "[5/13] Cleanup complete."
 
 
-echo "[5/12] Downloading BirdDog scripts..."
+echo "[6/13] Downloading BirdDog scripts..."
 
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_initial_setup.sh?$(date +%s)" -o bdm/bdm_initial_setup.sh
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_AP_setup.sh?$(date +%s)" -o bdm/bdm_AP_setup.sh
@@ -57,10 +74,10 @@ curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/devic
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/radio_map_setup.sh?$(date +%s)" -o common/radio_map_setup.sh
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/golden_image_creation.sh?$(date +%s)" -o common/golden_image_creation.sh
 
-echo "[5/12] Script download complete."
+echo "[6/13] Script download complete."
 
 
-echo "[6/12] Installing BirdDog CLI..."
+echo "[7/13] Installing BirdDog CLI..."
 
 cat << 'EOF' | sudo tee /usr/local/bin/birddog > /dev/null
 #!/bin/bash
@@ -173,20 +190,20 @@ EOF
 
 sudo chmod +x /usr/local/bin/birddog
 
-echo "[6/12] BirdDog CLI installed"
+echo "[7/13] BirdDog CLI installed"
 
 
-echo "[7/12] Setting executable permissions..."
+echo "[8/13] Setting executable permissions..."
 
 sudo chmod +x /opt/birddog/common/*.sh
 sudo chmod +x /opt/birddog/bdm/*.sh
 sudo chmod +x /opt/birddog/bdc/*.sh
 sudo chmod +x /opt/birddog/mesh/*.sh
 
-echo "[7/12] Permissions applied."
+echo "[8/13] Permissions applied."
 
 
-echo "[8/12] Verifying installation..."
+echo "[9/13] Verifying installation..."
 
 echo "--- /opt/birddog ---"
 ls -1 /opt/birddog
@@ -203,10 +220,10 @@ ls -1 /opt/birddog/bdc
 echo "--- /opt/birddog/mesh ---"
 ls -1 /opt/birddog/mesh
 
-echo "[8/12] Verification complete."
+echo "[9/13] Verification complete."
 
 
-echo "[9/12] Writing BirdDog version..."
+echo "[10/13] Writing BirdDog version..."
 
 VERSION_DIR="/opt/birddog/version"
 VERSION_FILE="$VERSION_DIR/VERSION"
