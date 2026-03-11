@@ -34,6 +34,17 @@ fi
 echo ""
 echo "=== System Preparation ==="
 
+echo "Setting system hostname..."
+hostnamectl set-hostname "$NEW_HOSTNAME"
+
+echo "Updating /etc/hosts..."
+
+if grep -q "^127.0.1.1" /etc/hosts; then
+    sed -i "s/^127.0.1.1.*/127.0.1.1   $NEW_HOSTNAME/" /etc/hosts
+else
+    echo "127.0.1.1   $NEW_HOSTNAME" >> /etc/hosts
+fi
+
 if [ -d /etc/cloud ]; then
     echo "Disabling cloud-init..."
     touch /etc/cloud/cloud-init.disabled
@@ -151,7 +162,6 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-
 
 systemctl daemon-reload
 systemctl enable birddog-stream.service
