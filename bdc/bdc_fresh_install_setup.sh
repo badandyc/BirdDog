@@ -178,3 +178,7 @@ echo ""
 echo "Install log saved to:"
 echo "$LOG"
 echo ""
+
+echo "System will reboot in 10 seconds to finalize hostname configuration..."
+sleep 10
+reboot -f
