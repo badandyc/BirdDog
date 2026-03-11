@@ -70,28 +70,33 @@ until ip link show wlan1 >/dev/null 2>&1; do
     sleep 1
 done
 
+echo "Configuring mesh interface..." >> \$LOG
+
 ip link set wlan1 down >> \$LOG 2>&1 || true
 iw dev wlan1 set type mp >> \$LOG 2>&1
 ip link set wlan1 up >> \$LOG 2>&1
 
 sleep 2
 
-iw dev wlan1 mesh join birddog-mesh >> \$LOG 2>&1 || true
+echo "Disabling power save..." >> \$LOG
+iw dev wlan1 set power_save off >> \$LOG 2>&1
 
+echo "Joining mesh on fixed channel..." >> \$LOG
+iw dev wlan1 mesh join birddog-mesh freq 2412 >> \$LOG 2>&1 || true
+
+sleep 3
+
+echo "Assigning mesh IP..." >> \$LOG
 ip addr add $MESH_IP/24 dev wlan1 >> \$LOG 2>&1 || true
 
 echo "Interface state:" >> \$LOG
 ip addr show wlan1 >> \$LOG
 iw dev wlan1 info >> \$LOG
 
-echo "Peers:" >> \$LOG
-iw dev wlan1 station dump >> \$LOG
+echo "Allowing mesh convergence..." >> \$LOG
+sleep 15
 
-# ----------------------------------------------------
-# Neighbor cache warmer daemon (runs forever)
-# ----------------------------------------------------
-
-echo "Starting neighbor warmer daemon" >> \$LOG
+echo "Starting neighbor warmer daemon..." >> \$LOG
 
 (
 while true
@@ -108,7 +113,6 @@ echo "Mesh runtime complete" >> \$LOG
 EOF
 
 chmod +x /usr/local/bin/birddog-mesh-join.sh
-
 
 echo "Installing systemd mesh daemon..."
 
@@ -131,16 +135,13 @@ systemctl daemon-reload
 systemctl enable birddog-mesh
 systemctl restart birddog-mesh
 
-echo "Installing mesh CLI tool..."
-
-# (UNCHANGED mesh CLI install — keep your existing block here)
-
 echo ""
 echo "====================================="
 echo "Mesh subsystem installed"
 echo "Node: $HOSTNAME_INPUT"
 echo "Interface: wlan1"
 echo "IP: $MESH_IP"
+echo "Channel: 2412 MHz"
 echo "====================================="
 
 echo ""
