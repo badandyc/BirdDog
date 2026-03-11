@@ -238,7 +238,7 @@ do
     IP=$(echo "$NEIGH" | awk -v m="$MAC" '$5==m {print $1}')
     NAME=$(getent hosts "$IP" | awk '{print $2}')
     echo " ├─ ${NAME:-$MAC} (metric $METRIC)"
-done | sort -k4 -n
+done | sort -k3 -n
 
 echo ""
 }
