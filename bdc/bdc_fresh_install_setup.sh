@@ -10,7 +10,7 @@ echo "================================="
 date
 
 if [ "$EUID" -ne 0 ]; then
-    echo "Run as root: sudo bash /opt/birddog/common/start.sh"
+    echo "Run as root: sudo bash /opt/birddog/common/device_configure.sh"
     exit 1
 fi
 
