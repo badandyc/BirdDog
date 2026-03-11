@@ -69,7 +69,7 @@ echo "    birddog"
 echo ""
 echo "Next step:"
 echo ""
-echo "    birddog configure"
+echo "    birddog xxx"
 echo ""
 EOF
 
