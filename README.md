@@ -2,7 +2,7 @@ curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bootstrap.sh?
 
 NEW \
 rm -f ~/bootstrap.sh && \
-curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bootstrap.sh -o ~/bootstrap.sh && \
+curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bootstrap.sh?$(date +%s) -o ~/bootstrap.sh && \
 chmod +x ~/bootstrap.sh && \
 sudo ~/bootstrap.sh && \
 rm -f ~/bootstrap.sh
