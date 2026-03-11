@@ -71,9 +71,10 @@ NODE_NUM=$(echo "$HOSTNAME_INPUT" | cut -d- -f2)
 STREAM_NAME="cam${NODE_NUM}"
 
 echo ""
-echo "Setting hostname to $HOSTNAME_INPUT"
+echo "Applying hostname: $HOSTNAME_INPUT"
 
 hostnamectl set-hostname "$HOSTNAME_INPUT"
+hostname "$HOSTNAME_INPUT"
 
 # --------------------------------------------------
 
@@ -87,12 +88,12 @@ fi
 
 # --------------------------------------------------
 
-# reset avahi state after hostname change
+# reset avahi state AFTER hostname change
 
 # --------------------------------------------------
 
-systemctl restart avahi-daemon 2>/dev/null || true
 rm -rf /var/lib/avahi-daemon/* 2>/dev/null || true
+systemctl restart avahi-daemon 2>/dev/null || true
 
 # --------------------------------------------------
 
@@ -102,7 +103,7 @@ rm -rf /var/lib/avahi-daemon/* 2>/dev/null || true
 
 TMP_HOSTS="/tmp/birddog_hosts"
 
-cat <<EOF > $TMP_HOSTS
+cat <<EOF > "$TMP_HOSTS"
 127.0.0.1 localhost
 127.0.1.1 $HOSTNAME_INPUT
 
@@ -121,13 +122,13 @@ BDC_NAME="bdc-$(printf "%02d" $slot)"
 BDM_NAME="bdm-$(printf "%02d" $slot)"
 
 ```
-echo "$IP $BDC_NAME" >> $TMP_HOSTS
-echo "$IP $BDM_NAME" >> $TMP_HOSTS
+echo "$IP $BDC_NAME" >> "$TMP_HOSTS"
+echo "$IP $BDM_NAME" >> "$TMP_HOSTS"
 ```
 
 done
 
-cp $TMP_HOSTS /etc/hosts
+mv "$TMP_HOSTS" /etc/hosts
 
 # --------------------------------------------------
 
@@ -142,12 +143,17 @@ if [[ "$REUSE_ALL" == "1" ]]; then
     echo ""
     echo "[BDC] Reusing existing configuration..."
 else
-    read -p "Enter BDM hostname (without .local): " BDM_NAME
 
-    if [[ ! "$BDM_NAME" =~ ^bdm-[0-9]{2}$ ]]; then
+    while true
+    do
+        read -p "Enter BDM hostname (without .local): " BDM_NAME
+
+        if [[ "$BDM_NAME" =~ ^bdm-[0-9]{2}$ ]]; then
+            break
+        fi
+
         echo "Invalid BDM hostname format"
-        exit 1
-    fi
+    done
 
     BDM_HOST="${BDM_NAME}.local"
 fi
@@ -163,7 +169,8 @@ echo ""
 echo "[BDC] Installing mesh..."
 bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
 
-sleep 2
+echo "Waiting for mesh service..."
+sleep 3
 
 if ! systemctl is-active --quiet birddog-mesh.service; then
     echo "ERROR: Mesh service failed to start"
@@ -192,7 +199,8 @@ echo ""
 echo "[BDM] Installing mesh..."
 bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
 
-sleep 2
+echo "Waiting for mesh service..."
+sleep 3
 
 if ! systemctl is-active --quiet birddog-mesh.service; then
     echo "ERROR: Mesh service failed to start"
@@ -208,7 +216,7 @@ fi
 echo ""
 echo "====================================="
 echo "Device configuration complete."
-echo "Rebooting in 10 seconds..."
 echo "====================================="
-#sleep 10
-#reboot -f
+echo ""
+echo "Recommended: reboot node now"
+echo ""
