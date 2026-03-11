@@ -5,55 +5,71 @@ echo "====================================="
 echo "BirdDog Device Configuration"
 echo "====================================="
 
-CURRENT_HOSTNAME=$(hostname)
-
-echo ""
-echo "Current hostname detected: $CURRENT_HOSTNAME"
-
-read -rp "Keep current hostname + BDM association? (y/n): " KEEP
-
-if [[ "$KEEP" =~ ^[Yy]$ ]]; then
-
-    HOSTNAME_INPUT="$CURRENT_HOSTNAME"
-
-    # try to recover previous BDM + stream config
-    BDM_HOST=$(grep BDM_HOST /opt/birddog/version/VERSION 2>/dev/null | cut -d= -f2 || true)
-    STREAM_NAME=$(grep STREAM_NAME /opt/birddog/version/VERSION 2>/dev/null | cut -d= -f2 || true)
-
-    echo "Reusing hostname: $HOSTNAME_INPUT"
-    [[ -n "$BDM_HOST" ]] && echo "Reusing BDM host: $BDM_HOST"
-    [[ -n "$STREAM_NAME" ]] && echo "Reusing stream: $STREAM_NAME"
-
-else
-
-    read -rp "Enter hostname (bdm-xx or bdc-xx): " HOSTNAME_INPUT
-
-    if [[ ! "$HOSTNAME_INPUT" =~ ^bd[cm]-[0-9]{2}$ ]]; then
-        echo "Invalid hostname format"
-        exit 1
-    fi
-
-    sudo hostnamectl set-hostname "$HOSTNAME_INPUT"
-
-    if [[ "$HOSTNAME_INPUT" == bdc-* ]]; then
-        read -rp "Enter BDM hostname: " BDM_HOST
-        read -rp "Enter stream name: " STREAM_NAME
-    fi
-
+if [ "$EUID" -ne 0 ]; then
+    echo "Run as root: sudo birddog configure"
+    exit 1
 fi
 
-NODE_NUM=$(echo "$HOSTNAME_INPUT" | grep -oE '[0-9]{2}')
-MESH_IP="10.10.20.$((NODE_NUM*10))"
+BDC_CONFIG="/opt/birddog/bdc/bdc.conf"
+CURRENT_HOST=$(hostname)
+
+REUSE_ALL=0
+
+# --------------------------------------------------
+# Combined reuse detection (BDC hostname + BDM link)
+# --------------------------------------------------
+
+if [[ "$CURRENT_HOST" =~ ^bdc-[0-9]{2}$ && -f "$BDC_CONFIG" ]]; then
+
+    source "$BDC_CONFIG"
+
+    if [[ -n "$BDM_HOST" ]]; then
+        echo ""
+        echo "Existing configuration detected:"
+        echo "BDC Hostname : $CURRENT_HOST"
+        echo "BDM Host     : $BDM_HOST"
+        echo ""
+        read -p "Keep current BDC and BDM settings? (y/n): " KEEP_ALL
+
+        if [[ "$KEEP_ALL" =~ ^[Yy]$ ]]; then
+            HOSTNAME_INPUT="$CURRENT_HOST"
+            REUSE_ALL=1
+        fi
+    fi
+fi
+
+# --------------------------------------------------
+# New hostname entry + validation
+# --------------------------------------------------
+
+if [[ "$REUSE_ALL" != "1" ]]; then
+
+    read -p "Enter BirdDog hostname (bdm-## or bdc-##): " HOSTNAME_INPUT
+
+    if [[ ! "$HOSTNAME_INPUT" =~ ^bd[cm]-[0-9]{2}$ ]]; then
+        echo "Invalid hostname format (must be bdm-01 or bdc-01)"
+        exit 1
+    fi
+fi
+
+ROLE=$(echo "$HOSTNAME_INPUT" | cut -d- -f1)
+NODE_NUM=$(echo "$HOSTNAME_INPUT" | cut -d- -f2)
+STREAM_NAME="cam${NODE_NUM}"
 
 echo ""
-echo "Final hostname: $HOSTNAME_INPUT"
-echo "Mesh IP: $MESH_IP"
+echo "Setting hostname to $HOSTNAME_INPUT"
 
-echo ""
-echo "[Hosts] Disable cloud-init control"
-sudo sed -i 's/^manage_etc_hosts:.*/manage_etc_hosts: false/' /etc/cloud/cloud.cfg || true
+hostnamectl set-hostname "$HOSTNAME_INPUT"
 
-echo "[Hosts] Rebuilding deterministic mesh table"
+# --------------------------------------------------
+# FIX 1 — disable cloud-init host overwrite
+# --------------------------------------------------
+
+sed -i 's/^manage_etc_hosts:.*/manage_etc_hosts: false/' /etc/cloud/cloud.cfg || true
+
+# --------------------------------------------------
+# FIX 2 — deterministic mesh hosts table
+# --------------------------------------------------
 
 TMP_HOSTS="/tmp/birddog_hosts"
 
@@ -75,32 +91,66 @@ do
     echo "$IP $NAME" >> $TMP_HOSTS
 done
 
-sudo cp $TMP_HOSTS /etc/hosts
+cp $TMP_HOSTS /etc/hosts
 
-echo ""
-echo "[Role Install]"
+# --------------------------------------------------
+# ROLE: BDC
+# --------------------------------------------------
 
-if [[ "$HOSTNAME_INPUT" == bdm-* ]]; then
+if [[ "$ROLE" == "bdc" ]]; then
 
-    bash /opt/birddog/bdm/bdm_initial_setup.sh
+    if [[ "$REUSE_ALL" == "1" ]]; then
+        echo ""
+        echo "[BDC] Reusing existing configuration..."
+    else
+        read -p "Enter BDM hostname (without .local): " BDM_NAME
+
+        if [[ ! "$BDM_NAME" =~ ^bdm-[0-9]{2}$ ]]; then
+            echo "Invalid BDM hostname format"
+            exit 1
+        fi
+
+        BDM_HOST="${BDM_NAME}.local"
+    fi
+
+    echo ""
+    echo "[BDC] Running installer..."
+    bash /opt/birddog/bdc/bdc_fresh_install_setup.sh \
+        "$HOSTNAME_INPUT" \
+        "$BDM_HOST" \
+        "$STREAM_NAME"
+
+    echo ""
+    echo "[BDC] Installing mesh..."
+    bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
+
+# --------------------------------------------------
+# ROLE: BDM
+# --------------------------------------------------
+
+elif [[ "$ROLE" == "bdm" ]]; then
+
+    echo ""
+    echo "[BDM] Running installer..."
+
+    bash /opt/birddog/bdm/bdm_initial_setup.sh "$HOSTNAME_INPUT"
     bash /opt/birddog/bdm/bdm_AP_setup.sh
     bash /opt/birddog/bdm/bdm_mediamtx_setup.sh
     bash /opt/birddog/bdm/bdm_web_setup.sh
 
+    echo ""
+    echo "[BDM] Installing mesh..."
+    bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
+
 else
-
-    bash /opt/birddog/bdc/bdc_fresh_install_setup.sh "$BDM_HOST" "$STREAM_NAME"
-
+    echo "Unknown role"
+    exit 1
 fi
 
 echo ""
-echo "[Mesh Install]"
-bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
-
-echo ""
 echo "====================================="
-echo "Configuration Complete — Rebooting"
+echo "Device configuration complete."
+echo "Rebooting in 10 seconds..."
 echo "====================================="
-
-sleep 3
-sudo reboot
+#sleep 10
+#reboot -f
