@@ -55,7 +55,11 @@ iw dev wlan1 set power_save off >> \$LOG 2>&1 || true
 
 sleep 2
 
-iw dev wlan1 mesh join birddog-mesh >> \$LOG 2>&1 || true
+iw dev wlan1 set channel 1 HT20 >> \$LOG 2>&1 || true
+
+sleep 1
+
+iw dev wlan1 mesh join birddog-mesh freq 2412 >> \$LOG 2>&1 || true
 
 ip addr flush dev wlan1 >> \$LOG 2>&1 || true
 ip addr add $MESH_IP/24 dev wlan1 >> \$LOG 2>&1
