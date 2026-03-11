@@ -1,40 +1,47 @@
 #!/bin/bash
 set -e
 
-mkdir -p /opt/birddog/radio
+echo "================================="
+echo "BirdDog Radio Mapping Installer"
+echo "================================="
+
+INSTALL_PATH="/usr/local/bin/birddog-radio-map.sh"
+SERVICE_PATH="/etc/systemd/system/birddog-radio-map.service"
+LOG_DIR="/opt/birddog/radio"
+LOG_FILE="$LOG_DIR/radio_map.log"
+MARKER="/run/birddog-radio-map.done"
+
+mkdir -p "$LOG_DIR"
+
+cat <<'EOF' > $INSTALL_PATH
+#!/bin/bash
 
 LOG="/opt/birddog/radio/radio_map.log"
-exec > >(tee -a "$LOG") 2>&1
+MARKER="/run/birddog-radio-map.done"
 
+exec >> "$LOG" 2>&1
+
+echo ""
 echo "================================="
-echo "BirdDog Radio Mapping Setup"
-date
+echo "Radio Mapping Runtime $(date)"
 echo "================================="
 
-echo "Waiting for wireless interfaces..."
 sleep 5
 
 INTERFACES=$(iw dev | awk '$1=="Interface"{print $2}')
 
 if [[ -z "$INTERFACES" ]]; then
-    echo "ERROR: No wireless interfaces detected."
-    exit 1
+    echo "No wireless interfaces detected — exiting"
+    exit 0
 fi
-
-echo ""
-echo "Detected wireless interfaces:"
-echo "$INTERFACES"
-echo ""
 
 declare -A TARGET_MAP
 
 for IF in $INTERFACES
 do
+    DRIVER=$(ethtool -i $IF 2>/dev/null | awk '/driver:/{print $2}')
 
-    DRIVER=$(ethtool -i $IF 2>/dev/null | grep driver | awk '{print $2}')
-
-    echo "Interface: $IF"
-    echo "Driver: $DRIVER"
+    echo "Detected $IF driver=$DRIVER"
 
     if [[ "$DRIVER" == "brcmfmac" ]]; then
         TARGET="wlan0"
@@ -46,48 +53,64 @@ do
         TARGET="wlan2"
     fi
 
-    echo "Mapping target → $TARGET"
-
     TARGET_MAP[$IF]=$TARGET
-
-    echo ""
-
 done
 
+echo "Applying mapping..."
 
-echo "================================="
-echo "Applying interface mapping"
-echo "================================="
-
-# Step 1: rename everything to temp names to avoid collisions
+# temp rename to avoid collisions
 for IF in "${!TARGET_MAP[@]}"
 do
-    ip link set $IF down
-    ip link set $IF name temp_$IF
+    ip link set $IF down || true
+    ip link set $IF name temp_$IF || true
 done
 
-# Step 2: rename temp names to targets
+# final rename
 for IF in "${!TARGET_MAP[@]}"
 do
     TARGET=${TARGET_MAP[$IF]}
-    ip link set temp_$IF name $TARGET
+    ip link set temp_$IF name $TARGET || true
 done
 
-
 echo ""
-echo "================================="
-echo "Final Radio Layout"
-echo "================================="
-
+echo "Final layout:"
 for IF in wlan0 wlan1 wlan2
 do
     if ip link show $IF >/dev/null 2>&1; then
-        DRIVER=$(ethtool -i $IF 2>/dev/null | grep driver | awk '{print $2}')
-        echo "$IF  →  $DRIVER"
+        DRIVER=$(ethtool -i $IF 2>/dev/null | awk '/driver:/{print $2}')
+        echo "$IF → $DRIVER"
     fi
 done
 
-echo ""
+touch "$MARKER"
+
 echo "Radio mapping complete."
-echo "Log saved to:"
-echo "$LOG"
+EOF
+
+chmod +x $INSTALL_PATH
+
+cat <<EOF > $SERVICE_PATH
+[Unit]
+Description=BirdDog Radio Mapping
+DefaultDependencies=no
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=$INSTALL_PATH
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable birddog-radio-map.service
+
+echo ""
+echo "================================="
+echo "Radio mapping service installed"
+echo "Runs automatically at boot"
+echo "Log: $LOG_FILE"
+echo "================================="
