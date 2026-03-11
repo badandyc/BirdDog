@@ -8,14 +8,25 @@ echo "====================================="
 CURRENT_HOSTNAME=$(hostname)
 
 echo ""
-echo "Detected current hostname: $CURRENT_HOSTNAME"
+echo "Current hostname detected: $CURRENT_HOSTNAME"
 
-read -rp "Do you want to keep current hostname? (y/n): " KEEP_HOST
+read -rp "Keep current hostname + BDM association? (y/n): " KEEP
 
-if [[ "$KEEP_HOST" =~ ^[Yy]$ ]]; then
+if [[ "$KEEP" =~ ^[Yy]$ ]]; then
+
     HOSTNAME_INPUT="$CURRENT_HOSTNAME"
+
+    # try to recover previous BDM + stream config
+    BDM_HOST=$(grep BDM_HOST /opt/birddog/version/VERSION 2>/dev/null | cut -d= -f2 || true)
+    STREAM_NAME=$(grep STREAM_NAME /opt/birddog/version/VERSION 2>/dev/null | cut -d= -f2 || true)
+
+    echo "Reusing hostname: $HOSTNAME_INPUT"
+    [[ -n "$BDM_HOST" ]] && echo "Reusing BDM host: $BDM_HOST"
+    [[ -n "$STREAM_NAME" ]] && echo "Reusing stream: $STREAM_NAME"
+
 else
-    read -rp "Enter new hostname (bdm-xx or bdc-xx): " HOSTNAME_INPUT
+
+    read -rp "Enter hostname (bdm-xx or bdc-xx): " HOSTNAME_INPUT
 
     if [[ ! "$HOSTNAME_INPUT" =~ ^bd[cm]-[0-9]{2}$ ]]; then
         echo "Invalid hostname format"
@@ -23,15 +34,15 @@ else
     fi
 
     sudo hostnamectl set-hostname "$HOSTNAME_INPUT"
+
+    if [[ "$HOSTNAME_INPUT" == bdc-* ]]; then
+        read -rp "Enter BDM hostname: " BDM_HOST
+        read -rp "Enter stream name: " STREAM_NAME
+    fi
+
 fi
 
 NODE_NUM=$(echo "$HOSTNAME_INPUT" | grep -oE '[0-9]{2}')
-
-if [[ -z "$NODE_NUM" ]]; then
-    echo "Hostname must end in number"
-    exit 1
-fi
-
 MESH_IP="10.10.20.$((NODE_NUM*10))"
 
 echo ""
@@ -39,11 +50,10 @@ echo "Final hostname: $HOSTNAME_INPUT"
 echo "Mesh IP: $MESH_IP"
 
 echo ""
-echo "[Step 1] Disable cloud-init hosts management"
+echo "[Hosts] Disable cloud-init control"
 sudo sed -i 's/^manage_etc_hosts:.*/manage_etc_hosts: false/' /etc/cloud/cloud.cfg || true
 
-echo ""
-echo "[Step 2] Rebuild deterministic mesh hosts table"
+echo "[Hosts] Rebuilding deterministic mesh table"
 
 TMP_HOSTS="/tmp/birddog_hosts"
 
@@ -68,17 +78,9 @@ done
 sudo cp $TMP_HOSTS /etc/hosts
 
 echo ""
-echo "[Step 3] Role specific configuration"
+echo "[Role Install]"
 
 if [[ "$HOSTNAME_INPUT" == bdm-* ]]; then
-
-    echo ""
-    read -rp "Enter BDM hostname (example bdm-01): " BDM_HOST
-
-    if [[ ! "$BDM_HOST" =~ ^bdm-[0-9]{2}$ ]]; then
-        echo "Invalid BDM hostname"
-        exit 1
-    fi
 
     bash /opt/birddog/bdm/bdm_initial_setup.sh
     bash /opt/birddog/bdm/bdm_AP_setup.sh
@@ -87,33 +89,17 @@ if [[ "$HOSTNAME_INPUT" == bdm-* ]]; then
 
 else
 
-    echo ""
-    read -rp "Enter BDM hostname (example bdm-01): " BDM_HOST
-
-    if [[ ! "$BDM_HOST" =~ ^bdm-[0-9]{2}$ ]]; then
-        echo "Invalid BDM hostname"
-        exit 1
-    fi
-
-    read -rp "Enter stream name (example cam01): " STREAM_NAME
-
-    if [[ -z "$STREAM_NAME" ]]; then
-        echo "Stream name cannot be empty"
-        exit 1
-    fi
-
     bash /opt/birddog/bdc/bdc_fresh_install_setup.sh "$BDM_HOST" "$STREAM_NAME"
 
 fi
 
 echo ""
-echo "[Step 4] Install mesh runtime"
+echo "[Mesh Install]"
 bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
 
 echo ""
 echo "====================================="
-echo "Configuration Complete"
-echo "System will reboot"
+echo "Configuration Complete — Rebooting"
 echo "====================================="
 
 sleep 3
