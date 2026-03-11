@@ -11,31 +11,40 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 BDC_CONFIG="/opt/birddog/bdc/bdc.conf"
-
 CURRENT_HOST=$(hostname)
 
-REUSE_HOST=0
-REUSE_BDM=0
+REUSE_ALL=0
 
 # --------------------------------------------------
-# Hostname reuse detection
+# Combined reuse detection (BDC hostname + BDM link)
 # --------------------------------------------------
 
-if [[ "$CURRENT_HOST" =~ ^bd[cm]-[0-9]{2}$ ]]; then
-    echo ""
-    echo "Existing BirdDog hostname detected: $CURRENT_HOST"
-    read -p "Keep hostname? (y/n): " KEEP_HOST
-    if [[ "$KEEP_HOST" =~ ^[Yy]$ ]]; then
-        HOSTNAME_INPUT="$CURRENT_HOST"
-        REUSE_HOST=1
+if [[ "$CURRENT_HOST" =~ ^bdc-[0-9]{2}$ && -f "$BDC_CONFIG" ]]; then
+
+    source "$BDC_CONFIG"
+
+    if [[ -n "$BDM_HOST" ]]; then
+        echo ""
+        echo "Existing configuration detected:"
+        echo "BDC Hostname : $CURRENT_HOST"
+        echo "BDM Host     : $BDM_HOST"
+        echo ""
+        read -p "Keep current BDC and BDM settings? (y/n): " KEEP_ALL
+
+        if [[ "$KEEP_ALL" =~ ^[Yy]$ ]]; then
+            HOSTNAME_INPUT="$CURRENT_HOST"
+            REUSE_ALL=1
+        fi
     fi
 fi
+
 
 # --------------------------------------------------
 # New hostname entry + validation
 # --------------------------------------------------
 
-if [[ "$REUSE_HOST" != "1" ]]; then
+if [[ "$REUSE_ALL" != "1" ]]; then
+
     read -p "Enter BirdDog hostname (bdm-## or bdc-##): " HOSTNAME_INPUT
 
     if [[ ! "$HOSTNAME_INPUT" =~ ^bd[cm]-[0-9]{2}$ ]]; then
@@ -66,19 +75,10 @@ fi
 
 if [[ "$ROLE" == "bdc" ]]; then
 
-    if [[ -f "$BDC_CONFIG" ]]; then
-        source "$BDC_CONFIG"
+    if [[ "$REUSE_ALL" == "1" ]]; then
         echo ""
-        echo "Existing BDM link detected: $BDM_HOST"
-        read -p "Keep BDM association? (y/n): " KEEP_BDM
-        if [[ "$KEEP_BDM" =~ ^[Yy]$ ]]; then
-            REUSE_BDM=1
-        else
-            unset BDM_HOST
-        fi
-    fi
-
-    if [[ "$REUSE_BDM" != "1" ]]; then
+        echo "[BDC] Reusing existing configuration..."
+    else
         read -p "Enter BDM hostname (without .local): " BDM_NAME
 
         if [[ ! "$BDM_NAME" =~ ^bdm-[0-9]{2}$ ]]; then
@@ -90,7 +90,7 @@ if [[ "$ROLE" == "bdc" ]]; then
     fi
 
     echo ""
-    echo "[BDC] Running setup..."
+    echo "[BDC] Running installer..."
     bash /opt/birddog/bdc/bdc_fresh_install_setup.sh \
         "$HOSTNAME_INPUT" \
         "$BDM_HOST" \
@@ -100,6 +100,7 @@ if [[ "$ROLE" == "bdc" ]]; then
     echo "[BDC] Installing mesh..."
     bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
 
+
 # --------------------------------------------------
 # ROLE: BDM
 # --------------------------------------------------
@@ -107,7 +108,7 @@ if [[ "$ROLE" == "bdc" ]]; then
 elif [[ "$ROLE" == "bdm" ]]; then
 
     echo ""
-    echo "[BDM] Running setup..."
+    echo "[BDM] Running installer..."
 
     bash /opt/birddog/bdm/bdm_initial_setup.sh "$HOSTNAME_INPUT"
     bash /opt/birddog/bdm/bdm_AP_setup.sh
@@ -129,5 +130,5 @@ echo "====================================="
 echo "Device configuration complete."
 echo "Rebooting in 10 seconds..."
 echo "====================================="
-sleep 10
+#sleep 10
 #reboot -f
