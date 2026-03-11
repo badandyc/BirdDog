@@ -1,4 +1,4 @@
-curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bootstrap.sh?$(date +%s) | sudo bash
 
 Converting this repository for all scripts to be included in golden master img
 
