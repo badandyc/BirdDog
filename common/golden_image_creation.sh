@@ -11,14 +11,11 @@ mkdir -p $BIRDDOG_ROOT/{bdm,bdc,mesh,common,mediamtx,web,logs,version}
 
 echo "[Phase 1] Package Assurance"
 
-#sudo apt update
-
 for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool; do
-    dpkg -s "$pkg" >/dev/null 2>&1 || sudo apt install -y "$pkg"
+dpkg -s "$pkg" >/dev/null 2>&1 || sudo apt install -y "$pkg"
 done
 
 echo "Packages ready."
-
 
 echo "[Phase 2] Commit State Check"
 
@@ -40,7 +37,6 @@ echo "TO   commit: $NEW_COMMIT"
 echo "-------------------------------------"
 echo ""
 
-
 echo "[Phase 3] Script Fetch + Diff Report"
 
 fetch_file() {
@@ -53,20 +49,20 @@ TMP_FILE="/tmp/birddog_fetch.$$"
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/$REMOTE_PATH" -o "$TMP_FILE"
 
 if [[ ! -f "$LOCAL_PATH" ]]; then
-    echo "NEW       $REMOTE_PATH"
-    mv "$TMP_FILE" "$LOCAL_PATH"
-    return
+echo "NEW       $REMOTE_PATH"
+mv "$TMP_FILE" "$LOCAL_PATH"
+return
 fi
 
 REMOTE_SUM=$(sha256sum "$TMP_FILE" | awk '{print $1}')
 LOCAL_SUM=$(sha256sum "$LOCAL_PATH" | awk '{print $1}')
 
 if [[ "$REMOTE_SUM" == "$LOCAL_SUM" ]]; then
-    echo "UNCHANGED $REMOTE_PATH"
-    rm "$TMP_FILE"
+echo "UNCHANGED $REMOTE_PATH"
+rm "$TMP_FILE"
 else
-    echo "UPDATED   $REMOTE_PATH"
-    mv "$TMP_FILE" "$LOCAL_PATH"
+echo "UPDATED   $REMOTE_PATH"
+mv "$TMP_FILE" "$LOCAL_PATH"
 fi
 }
 
@@ -85,7 +81,6 @@ fetch_file common/golden_image_creation.sh $BIRDDOG_ROOT/common/golden_image_cre
 
 echo "$REMOTE_COMMIT" > $COMMIT_FILE
 
-
 echo "[Phase 4] Install Library"
 
 cat << 'EOF' > $BIRDDOG_ROOT/common/install_lib.sh
@@ -99,7 +94,7 @@ mkdir -p "$LOG_DIR" "$VERSION_DIR"
 
 start_install_log() {
 TYPE="$1"
-LOGFILE="$LOG_DIR/${TYPE}_$(date +%Y%m%d_%H%M%S).log"
+LOGFILE="$LOG_DIR/${TYPE}*$(date +%Y%m%d*%H%M%S).log"
 exec > >(tee -a "$LOGFILE") 2>&1
 echo "BirdDog Install Session: $TYPE"
 echo "Time: $(date)"
@@ -117,7 +112,7 @@ EOV
 }
 
 generate_manifest() {
-find "$BIRDDOG_ROOT" -name "*.sh" -exec sha256sum {} \; | sort > "$VERSION_DIR/MANIFEST"
+find "$BIRDDOG_ROOT" -name "*.sh" -exec sha256sum {} ; | sort > "$VERSION_DIR/MANIFEST"
 }
 EOF
 
@@ -126,14 +121,12 @@ chmod +x $BIRDDOG_ROOT/common/install_lib.sh
 source $BIRDDOG_ROOT/common/install_lib.sh
 start_install_log golden
 
-
 echo "[Phase 5] Permission Enforcement"
 
 chmod +x $BIRDDOG_ROOT/common/*.sh
 chmod +x $BIRDDOG_ROOT/bdm/*.sh
 chmod +x $BIRDDOG_ROOT/bdc/*.sh
 chmod +x $BIRDDOG_ROOT/mesh/*.sh
-
 
 echo "[Phase 6] Installing / Refreshing BirdDog CLI"
 
@@ -144,154 +137,48 @@ set -e
 ORIG_ARGS=("$@")
 
 require_root() {
-    if [ "$EUID" -ne 0 ]; then
-        echo "Elevating privileges..."
-        exec sudo "$0" "${ORIG_ARGS[@]}"
-    fi
+if [ "$EUID" -ne 0 ]; then
+echo "Elevating privileges..."
+exec sudo "$0" "${ORIG_ARGS[@]}"
+fi
 }
 
 source /opt/birddog/common/install_lib.sh 2>/dev/null || true
 
-MESH_IF="wlan1"
-MESH_LOG="/opt/birddog/mesh/mesh_runtime.log"
-
-mesh_status() {
-
-SNAP_STATION="$(iw dev $MESH_IF station dump 2>/dev/null)"
-SNAP_NEIGH="$(ip neigh show dev $MESH_IF 2>/dev/null)"
-STATE="$(grep 'STATE' "$MESH_LOG" 2>/dev/null | tail -1 | awk '{print $NF}')"
-STATE="${STATE:-INIT}"
+show_radios() {
 
 echo ""
 echo "================================="
-echo "BirdDog Mesh Status"
+echo "BirdDog Radio Layout"
 echo "================================="
 
-if ! ip link show $MESH_IF >/dev/null 2>&1; then
-    echo "Interface     : MISSING"
-    return
-fi
+iw dev | awk '
+$1=="Interface"{iface=$2}
+$1=="type"{type=$2}
+$1=="channel"{chan=$2}
+$1=="txpower"{tx=$2" "$3}
+$1=="ssid"{ssid=$2}
+$1=="mesh" && $2=="id"{mesh=$3}
 
-PEERS=$(echo "$SNAP_STATION" | grep -c 'mesh plink: ESTAB')
-
-IP=$(ip -4 addr show $MESH_IF 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)
-
-echo "Node          : $(hostname)"
-echo "Runtime State : $STATE"
-echo "Mesh IP       : ${IP:-NONE}"
-echo "Peers         : $PEERS"
-echo ""
+$1=="Interface" && NR>1{
+printf "%-6s %-8s %-6s %-10s %-10s\n", iface_prev,type_prev,chan_prev,tx_prev,(ssid_prev?ssid_prev:mesh_prev)
+ssid_prev=""
+mesh_prev=""
 }
 
-mesh_peers() {
-
-STATION="$(iw dev $MESH_IF station dump 2>/dev/null)"
-NEIGH="$(ip neigh show dev $MESH_IF 2>/dev/null)"
-
-echo ""
-echo "================================="
-echo "BirdDog Mesh Peers"
-echo "================================="
-
-printf "%-10s %-15s %-8s %-8s %-8s\n" "Node" "IP" "Signal" "Rate" "Metric"
-
-echo "$STATION" | awk '
-/^Station/ {mac=$2}
-/signal:/ {sig=$2}
-/tx bitrate:/ {rate=$3}
-/metric:/ {metric=$NF; print mac,sig,rate,metric}
-' | while read MAC SIG RATE METRIC
-do
-    IP=$(echo "$NEIGH" | awk -v m="$MAC" '$5==m {print $1}')
-    NAME=$(getent hosts "$IP" | awk '{print $2}')
-    printf "%-10s %-15s %-8s %-8s %-8s\n" "${NAME:-$MAC}" "${IP:-?}" "$SIG" "$RATE" "$METRIC"
-done | sort -k5 -n
-
-echo ""
+{
+iface_prev=iface
+type_prev=type
+chan_prev=chan
+tx_prev=tx
+ssid_prev=ssid
+mesh_prev=mesh
 }
 
-mesh_state() {
+END{
+printf "%-6s %-8s %-6s %-10s %-10s\n", iface_prev,type_prev,chan_prev,tx_prev,(ssid_prev?ssid_prev:mesh_prev)
+}'
 echo ""
-echo "================================="
-echo "BirdDog Mesh Runtime State"
-echo "================================="
-grep 'STATE' "$MESH_LOG" 2>/dev/null | tail -10 || echo "No runtime state yet"
-echo ""
-}
-
-mesh_map() {
-
-STATION="$(iw dev $MESH_IF station dump 2>/dev/null)"
-NEIGH="$(ip neigh show dev $MESH_IF 2>/dev/null)"
-
-echo ""
-echo "================================="
-echo "BirdDog Mesh Map"
-echo "================================="
-
-echo "$(hostname)"
-
-echo "$STATION" | awk '
-/^Station/ {mac=$2}
-/metric/ {metric=$NF; print mac,metric}
-' | while read MAC METRIC
-do
-    IP=$(echo "$NEIGH" | awk -v m="$MAC" '$5==m {print $1}')
-    NAME=$(getent hosts "$IP" | awk '{print $2}')
-    echo " ├─ ${NAME:-$MAC} (metric $METRIC)"
-done | sort -k3 -n
-
-echo ""
-}
-
-mesh_graph() {
-
-echo ""
-echo "================================="
-echo "BirdDog Mesh Graph"
-echo "================================="
-
-iw dev $MESH_IF mpath dump 2>/dev/null | awk '
-/dest/ {dest=$2}
-/next hop/ {hop=$3}
-/metric/ {metric=$2; printf "%s -> %s (metric %s)\n",dest,hop,metric}
-'
-
-echo ""
-}
-
-mesh_scan() {
-
-echo ""
-echo "================================="
-echo "BirdDog RF Scan"
-echo "================================="
-
-timeout 6 iw dev $MESH_IF scan 2>/dev/null | grep -E 'BSS|signal|SSID'
-
-echo ""
-}
-
-mesh_debug() {
-
-echo "===== IP ====="
-ip addr show $MESH_IF
-
-echo ""
-echo "===== STATION ====="
-iw dev $MESH_IF station dump
-
-echo ""
-echo "===== NEIGH ====="
-ip neigh show dev $MESH_IF
-
-echo ""
-echo "===== ROUTES ====="
-iw dev $MESH_IF mpath dump 2>/dev/null
-
-echo ""
-echo "===== LOG ====="
-tail -20 $MESH_LOG
 }
 
 update_scripts() {
@@ -303,13 +190,13 @@ echo "Remote commit: $REMOTE"
 echo "Local commit : $LOCAL"
 
 if [[ "$REMOTE" == "$LOCAL" ]]; then
-    echo "Already up-to-date."
-    exit 0
+echo "Already up-to-date."
+exit 0
 fi
 
 start_install_log update
 
-curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/golden_image_creation.sh?$(date +%s)" \
+curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/golden_image_creation.sh?$(date +%s)" 
 -o /opt/birddog/common/golden_image_creation.sh
 
 bash /opt/birddog/common/golden_image_creation.sh
@@ -323,42 +210,24 @@ echo "BirdDog Verification"
 echo "================================="
 
 if sha256sum -c /opt/birddog/version/MANIFEST >/dev/null 2>&1; then
-    echo "Script integrity : OK"
+echo "Script integrity : OK"
 else
-    echo "Script integrity : FAILED"
+echo "Script integrity : FAILED"
 fi
 
-if systemctl is-active birddog-mesh.service >/dev/null 2>&1 && \
-   ip link show $MESH_IF >/dev/null 2>&1 && \
-   iw dev $MESH_IF info 2>/dev/null | grep -q "mesh id birddog-mesh"; then
-    echo "Mesh service     : OK"
+if systemctl is-active birddog-mesh.service >/dev/null 2>&1; then
+echo "Mesh service     : OK"
 else
-    echo "Mesh service     : DOWN"
+echo "Mesh service     : DOWN"
 fi
-
-systemctl is-active nginx >/dev/null 2>&1 && echo "Web service      : OK" || true
 
 echo ""
 }
 
-echo ""
-echo "================================="
-echo "BirdDog CLI"
-echo "================================="
-
 case "$1" in
 
-mesh)
-case "$2" in
-status) mesh_status ;;
-peers) mesh_peers ;;
-state) mesh_state ;;
-map) mesh_map ;;
-graph) mesh_graph ;;
-scan) mesh_scan ;;
-debug) mesh_debug ;;
-*) echo "mesh commands: status | peers | state | map | graph | scan | debug" ;;
-esac
+radios)
+show_radios
 ;;
 
 install)
@@ -396,7 +265,7 @@ cat /opt/birddog/version/VERSION 2>/dev/null || echo "Unknown"
 
 *)
 echo "Commands:"
-echo " birddog mesh status|peers|state|map|graph|scan|debug"
+echo " birddog radios"
 echo " birddog install"
 echo " birddog configure"
 echo " birddog update"
@@ -419,7 +288,6 @@ echo "BirdDog Commit State:"
 echo "Previous: $PREVIOUS_COMMIT"
 echo "Current : $(cat $COMMIT_FILE)"
 echo ""
-
 
 echo ""
 echo "====================================="
