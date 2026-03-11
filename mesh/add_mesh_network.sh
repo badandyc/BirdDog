@@ -37,15 +37,25 @@ cat <<EOF > /usr/local/bin/birddog-mesh-join.sh
 LOG="$RUNTIME_LOG"
 MESH_IP="$MESH_IP/24"
 
-echo "=================================" >> \$LOG
-echo "Mesh runtime start \$(date)" >> \$LOG
-echo "Hostname: \$(hostname)" >> \$LOG
-
-sleep 5
-
+STATE="INIT"
 LAST_PEER_TIME=\$(date +%s)
+LAST_JOIN_TIME=0
+
+JOIN_COOLDOWN=15
+SUSPECT_THRESHOLD=15
+RECOVERY_THRESHOLD=40
+
+log_state() {
+    echo "[mesh] STATE → \$1" >> \$LOG
+}
 
 normalize_and_join() {
+
+    NOW=\$(date +%s)
+    if (( NOW - LAST_JOIN_TIME < JOIN_COOLDOWN )); then
+        echo "[mesh] join cooldown active" >> \$LOG
+        return
+    fi
 
     echo "[mesh] normalization + join attempt" >> \$LOG
 
@@ -66,20 +76,43 @@ normalize_and_join() {
 
     ip addr replace \$MESH_IP dev wlan1 >> \$LOG 2>&1 || true
 
+    LAST_JOIN_TIME=\$(date +%s)
+
     echo "[mesh] join successful" >> \$LOG
 }
+
+echo "=================================" >> \$LOG
+echo "Mesh runtime start \$(date)" >> \$LOG
+echo "Hostname: \$(hostname)" >> \$LOG
+
+sleep 5
+
+STATE="WAIT_INTERFACE"
+log_state "\$STATE"
 
 while true
 do
 
-    # --- interface disappearance trigger ---
+    # ---------------- WAIT_INTERFACE ----------------
     if ! ip link show wlan1 >/dev/null 2>&1; then
-        echo "[mesh] wlan1 missing" >> \$LOG
+        if [[ "\$STATE" != "WAIT_INTERFACE" ]]; then
+            STATE="WAIT_INTERFACE"
+            log_state "\$STATE"
+        fi
         sleep 2
         continue
     fi
 
-    # --- peer detection ---
+    # ---------------- NORMALIZE ON FIRST APPEAR ----------------
+    if [[ "\$STATE" == "WAIT_INTERFACE" ]]; then
+        STATE="NORMALIZE"
+        log_state "\$STATE"
+        normalize_and_join
+        STATE="CONVERGING"
+        log_state "\$STATE"
+    fi
+
+    # ---------------- PEER DETECTION ----------------
     PEER_FOUND=0
 
     for slot in \$(seq 1 25)
@@ -94,24 +127,62 @@ do
         fi
     done
 
-    # --- peer floor watchdog (20s) ---
     NOW=\$(date +%s)
     DELTA=\$((NOW - LAST_PEER_TIME))
 
-    if [ "\$PEER_FOUND" -eq 0 ] && [ "\$DELTA" -gt 20 ]; then
-        echo "[mesh] peer floor lost — rejoin required" >> \$LOG
+    # ---------------- STATE TRANSITIONS ----------------
+
+    if [[ "\$STATE" == "CONVERGING" ]]; then
+
+        if [[ "\$PEER_FOUND" -eq 1 ]]; then
+            STATE="STEADY"
+            log_state "\$STATE"
+        fi
+
+    elif [[ "\$STATE" == "STEADY" ]]; then
+
+        if (( DELTA > SUSPECT_THRESHOLD )); then
+            STATE="SUSPECT"
+            log_state "\$STATE"
+        fi
+
+    elif [[ "\$STATE" == "SUSPECT" ]]; then
+
+        if [[ "\$PEER_FOUND" -eq 1 ]]; then
+            STATE="STEADY"
+            log_state "\$STATE"
+
+        elif (( DELTA > RECOVERY_THRESHOLD )); then
+            STATE="RECOVERY"
+            log_state "\$STATE"
+        fi
+
+    elif [[ "\$STATE" == "RECOVERY" ]]; then
+
         normalize_and_join
-        sleep 3
+        STATE="CONVERGING"
+        log_state "\$STATE"
+    fi
+
+    # ---------------- BEHAVIOR PER STATE ----------------
+
+    if [[ "\$STATE" == "CONVERGING" ]]; then
+        sleep 2
         continue
     fi
 
-    # --- steady warmer ---
-    for slot in \$(seq 1 25)
+    if [[ "\$STATE" == "SUSPECT" ]]; then
+        sleep 5
+        continue
+    fi
+
+    # STEADY
+    for peer in \$(ip neigh show dev wlan1 | awk '{print \$1}')
     do
-        ping -c1 -W1 10.10.20.\$((slot*10)) >/dev/null 2>&1
+        ping -c1 -W1 \$peer >/dev/null 2>&1
     done
 
-    sleep 30
+    sleep \$((30 + RANDOM % 5))
 
 done
 EOF
