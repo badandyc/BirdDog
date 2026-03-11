@@ -13,7 +13,7 @@ echo "BirdDog Bootstrap"
 echo "====================================="
 echo ""
 
-echo "[1/4] Network check..."
+echo "[1/5] Network check..."
 
 if ! ping -c1 github.com >/dev/null 2>&1; then
     echo "ERROR: Cannot reach github.com"
@@ -23,7 +23,7 @@ fi
 echo "Network OK"
 
 
-echo "[2/4] TLS check..."
+echo "[2/5] TLS validation..."
 
 if ! curl -Is https://raw.githubusercontent.com >/dev/null 2>&1; then
     echo "ERROR: TLS validation failed"
@@ -33,14 +33,14 @@ fi
 echo "TLS OK"
 
 
-echo "[3/4] Determining latest commit..."
+echo "[3/5] Determining latest commit..."
 
 TARGET_COMMIT=$(git ls-remote https://github.com/badandyc/BirdDog HEAD | cut -c1-7)
 
 echo "Latest BirdDog commit: $TARGET_COMMIT"
 
 
-echo "[4/4] Downloading golden installer..."
+echo "[4/5] Fetching golden installer..."
 
 TMP_GOLDEN="/tmp/birddog_golden.$$"
 
@@ -49,14 +49,27 @@ curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/golde
 
 chmod +x "$TMP_GOLDEN"
 
+echo "Running golden installer..."
+
+sudo "$TMP_GOLDEN"
+
+rm -f "$TMP_GOLDEN"
+
+
+echo "[5/5] Cleaning bootstrap tool..."
+
+rm -f /usr/local/bin/bootstrap
+
 echo ""
-echo "Golden installer ready."
+echo "Bootstrap complete."
 echo ""
-echo "Run it with:"
+echo "BirdDog CLI is now available:"
 echo ""
-echo "    sudo $TMP_GOLDEN"
+echo "    birddog"
 echo ""
-echo "Or move it somewhere permanent."
+echo "Next step:"
+echo ""
+echo "    birddog configure"
 echo ""
 EOF
 
@@ -67,7 +80,7 @@ echo "====================================="
 echo "Bootstrap CLI Installed"
 echo "====================================="
 echo ""
-echo "Next step:"
+echo "Run:"
 echo ""
 echo "    bootstrap"
 echo ""
