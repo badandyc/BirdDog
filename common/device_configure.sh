@@ -10,12 +10,43 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-read -p "Enter BirdDog hostname (bdm-## or bdc-##): " HOSTNAME_INPUT
+BDC_CONFIG="/opt/birddog/bdc/bdc.conf"
 
-if [[ -z "$HOSTNAME_INPUT" ]]; then
-    echo "Hostname not provided"
-    exit 1
+if [[ -f "$BDC_CONFIG" ]]; then
+
+    source "$BDC_CONFIG"
+
+    echo ""
+    echo "Existing configuration detected:"
+    echo "BDC Hostname : $BDC_HOSTNAME"
+    echo "BDM Host     : $BDM_HOST"
+    echo ""
+
+    read -p "Keep this configuration? (y/n): " KEEP
+
+    if [[ "$KEEP" =~ ^[Yy]$ ]]; then
+        HOSTNAME_INPUT="$BDC_HOSTNAME"
+        SKIP_HOST_PROMPT=1
+    else
+        SKIP_HOST_PROMPT=0
+    fi
+
+else
+    SKIP_HOST_PROMPT=0
 fi
+
+
+if [[ "$SKIP_HOST_PROMPT" != "1" ]]; then
+
+    read -p "Enter BirdDog hostname (bdm-## or bdc-##): " HOSTNAME_INPUT
+
+    if [[ -z "$HOSTNAME_INPUT" ]]; then
+        echo "Hostname not provided"
+        exit 1
+    fi
+
+fi
+
 
 NODE_NUM=$(echo "$HOSTNAME_INPUT" | grep -oE '[0-9]+$')
 
@@ -29,13 +60,9 @@ echo "Setting hostname to $HOSTNAME_INPUT"
 hostnamectl set-hostname "$HOSTNAME_INPUT"
 
 echo "Updating /etc/hosts..."
-if grep -q "^127.0.1.1" /etc/hosts; then
-    sed -i "s/^127.0.1.1.*/127.0.1.1   $HOSTNAME_INPUT/" /etc/hosts
-else
-    echo "127.0.1.1   $HOSTNAME_INPUT" >> /etc/hosts
-fi
+sed -i "s/^127.0.1.1.*/127.0.1.1   $HOSTNAME_INPUT/" /etc/hosts || \
+echo "127.0.1.1   $HOSTNAME_INPUT" >> /etc/hosts
 
-echo ""
 
 if [[ "$HOSTNAME_INPUT" == bdm-* ]]; then
 
@@ -66,6 +93,7 @@ else
     echo "Invalid hostname prefix. Must be bdm-## or bdc-##"
     exit 1
 fi
+
 
 echo ""
 echo "====================================="
