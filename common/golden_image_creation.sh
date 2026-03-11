@@ -46,7 +46,7 @@ LOCAL_PATH="$2"
 
 TMP_FILE="/tmp/birddog_fetch.$$"
 
-curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/$REMOTE_PATH" -o "$TMP_FILE"
+curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/$REMOTE_COMMIT/$REMOTE_PATH" -o "$TMP_FILE"
 
 if [[ ! -f "$LOCAL_PATH" ]]; then
 echo "NEW       $REMOTE_PATH"
@@ -94,7 +94,7 @@ mkdir -p "$LOG_DIR" "$VERSION_DIR"
 
 start_install_log() {
 TYPE="$1"
-LOGFILE="$LOG_DIR/${TYPE}*$(date +%Y%m%d*%H%M%S).log"
+LOGFILE="$LOG_DIR/${TYPE}_$(date +%Y%m%d_%H%M%S).log"
 exec > >(tee -a "$LOGFILE") 2>&1
 echo "BirdDog Install Session: $TYPE"
 echo "Time: $(date)"
@@ -116,7 +116,7 @@ find "$BIRDDOG_ROOT" -type f -name "*.sh" \
 | sort \
 | while read f
 do
-    sha256sum "$f"
+sha256sum "$f"
 done > "$VERSION_DIR/MANIFEST"
 }
 EOF
@@ -201,7 +201,7 @@ fi
 
 start_install_log update
 
-curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/golden_image_creation.sh?$(date +%s)" 
+curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/$REMOTE/common/golden_image_creation.sh" \
 -o /opt/birddog/common/golden_image_creation.sh
 
 bash /opt/birddog/common/golden_image_creation.sh
