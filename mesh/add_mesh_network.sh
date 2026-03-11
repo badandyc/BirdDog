@@ -47,37 +47,47 @@ CONVERGED=0
 
 while true
 do
-    # ---- wait for interface (USB hotplug safe) ----
+
+    # --- wait for USB / interface ---
     if ! ip link show wlan1 >/dev/null 2>&1; then
-        echo "[mesh] wlan1 not present" >> \$LOG
+        echo "[mesh] wlan1 missing" >> \$LOG
+        CONVERGED=0
         sleep 2
         continue
     fi
 
-    # ---- normalize interface if not mesh ----
-    if ! iw dev wlan1 info 2>/dev/null | grep -q "type mesh"; then
-        echo "[mesh] reinitializing interface" >> \$LOG
+    # --- detect NOT JOINED state (true trigger) ---
+    if ! iw dev wlan1 info 2>/dev/null | grep -q "mesh id birddog-mesh"; then
+
+        echo "[mesh] join required — normalizing interface" >> \$LOG
 
         ip link set wlan1 down >> \$LOG 2>&1 || true
+
+        # always force deterministic mode
         iw dev wlan1 set type mp >> \$LOG 2>&1 || { sleep 2; continue; }
 
         iw dev wlan1 set power_save off >> \$LOG 2>&1 || true
 
         ip addr flush dev wlan1 >> \$LOG 2>&1 || true
+
         ip link set wlan1 up >> \$LOG 2>&1 || true
 
         iw dev wlan1 set channel 1 HT20 >> \$LOG 2>&1 || true
         sleep 1
 
-        iw dev wlan1 mesh join birddog-mesh freq 2412 >> \$LOG 2>&1 || { sleep 3; continue; }
+        iw dev wlan1 mesh join birddog-mesh freq 2412 >> \$LOG 2>&1 || {
+            echo "[mesh] join failed — retrying" >> \$LOG
+            sleep 3
+            continue
+        }
 
         ip addr add \$MESH_IP dev wlan1 >> \$LOG 2>&1 || true
 
-        echo "[mesh] join complete — starting convergence" >> \$LOG
+        echo "[mesh] join successful — restarting convergence" >> \$LOG
         CONVERGED=0
     fi
 
-    # ---- convergence phase ----
+    # --- convergence phase ---
     if [ "\$CONVERGED" -eq 0 ]; then
         for slot in \$(seq 1 25)
         do
@@ -90,18 +100,17 @@ do
                 break
             fi
         done
+        sleep 2
+        continue
     fi
 
-    # ---- steady warmer ----
-    if [ "\$CONVERGED" -eq 1 ]; then
-        for slot in \$(seq 1 25)
-        do
-            ping -c1 -W1 10.10.20.\$((slot*10)) >/dev/null 2>&1
-        done
-        sleep 30
-    else
-        sleep 2
-    fi
+    # --- steady warmer ---
+    for slot in \$(seq 1 25)
+    do
+        ping -c1 -W1 10.10.20.\$((slot*10)) >/dev/null 2>&1
+    done
+
+    sleep 30
 
 done
 EOF
