@@ -85,6 +85,9 @@ echo " - device_configure.sh downloaded"
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/radio_map_setup.sh?$(date +%s)" -o common/radio_map_setup.sh
 echo " - radio_map_setup.sh downloaded"
 
+curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/golden_image_creation.sh?$(date +%s)" -o common/golden_image_creation.sh
+echo " - golden_image_creation.sh downloaded"
+
 echo "[8/12] Common scripts complete."
 
 
