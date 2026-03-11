@@ -188,8 +188,8 @@ fi
 
 if systemctl is-enabled birddog-mesh.service >/dev/null 2>&1 && \
    systemctl is-active  birddog-mesh.service >/dev/null 2>&1 && \
-   ip link show wlan1 >/dev/null 2>&1 && \
-   ip addr show wlan1 | grep -q "10.10.20."; then
+   iw dev wlan1 info 2>/dev/null | grep -q "type mesh" && \
+   ip link show wlan1 2>/dev/null | grep -q "UP"; then
     echo "Mesh service     : OK"
 else
     echo "Mesh service     : DOWN"
