@@ -198,7 +198,7 @@ echo "$STATION" | awk '
 /^Station/ {mac=$2}
 /signal:/ {sig=$2}
 /tx bitrate:/ {rate=$3}
-/metric:/ {metric=$2; print mac,sig,rate,metric}
+/metric:/ {metric=$NF; print mac,sig,rate,metric}
 ' | while read MAC SIG RATE METRIC
 do
     IP=$(echo "$NEIGH" | awk -v m="$MAC" '$5==m {print $1}')
