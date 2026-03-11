@@ -1,7 +1,13 @@
 Converting this repository for all scripts to be included in golden master img
 
-birddog
-mesh
+rm -f ~/golden_image_creation.sh && \
+curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/common/golden_image_creation.sh -o ~/golden_image_creation.sh && \
+chmod +x ~/golden_image_creation.sh && \
+sudo ~/golden_image_creation.sh && \
+rm -f ~/golden_image_creation.sh
+
+birddog \
+mesh \
 
 MISC: \
 ping <bdm-hostname>.local \
