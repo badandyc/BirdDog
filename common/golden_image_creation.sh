@@ -186,10 +186,9 @@ else
     echo "Script integrity : FAILED"
 fi
 
-if systemctl is-enabled birddog-mesh.service >/dev/null 2>&1 && \
-   systemctl is-active  birddog-mesh.service >/dev/null 2>&1 && \
-   iw dev wlan1 info 2>/dev/null | grep -q "type mesh" && \
-   ip link show wlan1 2>/dev/null | grep -q "UP"; then
+if systemctl is-active birddog-mesh.service >/dev/null 2>&1 && \
+   ip link show wlan1 >/dev/null 2>&1 && \
+   iw dev wlan1 info 2>/dev/null | grep -q "mesh id birddog-mesh"; then
     echo "Mesh service     : OK"
 else
     echo "Mesh service     : DOWN"
