@@ -10,29 +10,21 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-BDC_CONFIG="/opt/birddog/bdc/bdc.conf"
+CURRENT_HOST=$(hostname)
 
-if [[ -f "$BDC_CONFIG" ]]; then
+SKIP_HOST_PROMPT=0
 
-    source "$BDC_CONFIG"
+if [[ "$CURRENT_HOST" == bdc-* || "$CURRENT_HOST" == bdm-* ]]; then
 
     echo ""
-    echo "Existing configuration detected:"
-    echo "BDC Hostname : $BDC_HOSTNAME"
-    echo "BDM Host     : $BDM_HOST"
-    echo ""
-
+    echo "Existing BirdDog hostname detected: $CURRENT_HOST"
     read -p "Keep this configuration? (y/n): " KEEP
 
     if [[ "$KEEP" =~ ^[Yy]$ ]]; then
-        HOSTNAME_INPUT="$BDC_HOSTNAME"
+        HOSTNAME_INPUT="$CURRENT_HOST"
         SKIP_HOST_PROMPT=1
-    else
-        SKIP_HOST_PROMPT=0
     fi
 
-else
-    SKIP_HOST_PROMPT=0
 fi
 
 
@@ -54,6 +46,7 @@ if [[ -z "$NODE_NUM" ]]; then
     echo "Hostname must end in number (example: bdc-01)"
     exit 1
 fi
+
 
 echo ""
 echo "Setting hostname to $HOSTNAME_INPUT"
