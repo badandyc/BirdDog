@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-LOG="/opt/birddog/install_bdc.log"
+LOG="/opt/birddog/bdc/install_bdc.log"
 exec > >(tee -a "$LOG") 2>&1
 
 echo "================================="
