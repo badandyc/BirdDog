@@ -40,7 +40,6 @@ echo "Mesh IP: $MESH_IP"
 
 echo ""
 echo "[Step 1] Disable cloud-init hosts management"
-
 sudo sed -i 's/^manage_etc_hosts:.*/manage_etc_hosts: false/' /etc/cloud/cloud.cfg || true
 
 echo ""
@@ -52,7 +51,6 @@ cat <<EOF > $TMP_HOSTS
 127.0.0.1 localhost
 127.0.1.1 $HOSTNAME_INPUT
 
-# IPv6
 ::1 localhost ip6-localhost ip6-loopback
 ff02::1 ip6-allnodes
 ff02::2 ip6-allrouters
@@ -70,20 +68,46 @@ done
 sudo cp $TMP_HOSTS /etc/hosts
 
 echo ""
-echo "[Step 3] Run role installer"
+echo "[Step 3] Role specific configuration"
 
 if [[ "$HOSTNAME_INPUT" == bdm-* ]]; then
+
+    echo ""
+    read -rp "Enter BDM hostname (example bdm-01): " BDM_HOST
+
+    if [[ ! "$BDM_HOST" =~ ^bdm-[0-9]{2}$ ]]; then
+        echo "Invalid BDM hostname"
+        exit 1
+    fi
+
     bash /opt/birddog/bdm/bdm_initial_setup.sh
     bash /opt/birddog/bdm/bdm_AP_setup.sh
     bash /opt/birddog/bdm/bdm_mediamtx_setup.sh
     bash /opt/birddog/bdm/bdm_web_setup.sh
+
 else
-    bash /opt/birddog/bdc/bdc_fresh_install_setup.sh
+
+    echo ""
+    read -rp "Enter BDM hostname (example bdm-01): " BDM_HOST
+
+    if [[ ! "$BDM_HOST" =~ ^bdm-[0-9]{2}$ ]]; then
+        echo "Invalid BDM hostname"
+        exit 1
+    fi
+
+    read -rp "Enter stream name (example cam01): " STREAM_NAME
+
+    if [[ -z "$STREAM_NAME" ]]; then
+        echo "Stream name cannot be empty"
+        exit 1
+    fi
+
+    bash /opt/birddog/bdc/bdc_fresh_install_setup.sh "$BDM_HOST" "$STREAM_NAME"
+
 fi
 
 echo ""
 echo "[Step 4] Install mesh runtime"
-
 bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
 
 echo ""
