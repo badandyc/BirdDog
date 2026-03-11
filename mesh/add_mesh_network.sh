@@ -53,7 +53,7 @@ echo "Stopping dhcpcd (if present)..."
 systemctl stop dhcpcd.service 2>/dev/null || true
 systemctl disable dhcpcd.service 2>/dev/null || true
 
-echo "Creating mesh runtime service..."
+echo "Creating mesh runtime script..."
 
 cat <<EOF > /usr/local/bin/birddog-mesh-join.sh
 #!/bin/bash
@@ -70,7 +70,11 @@ until ip link show wlan1 >/dev/null 2>&1; do
     sleep 1
 done
 
+rfkill unblock wifi >> \$LOG 2>&1 || true
+
 ip link set wlan1 down >> \$LOG 2>&1 || true
+sleep 1
+
 iw dev wlan1 set type mp >> \$LOG 2>&1
 ip link set wlan1 up >> \$LOG 2>&1
 
@@ -92,10 +96,13 @@ EOF
 
 chmod +x /usr/local/bin/birddog-mesh-join.sh
 
+echo "Creating systemd mesh service..."
+
 cat <<EOF > /etc/systemd/system/birddog-mesh.service
 [Unit]
 Description=BirdDog Mesh Join
-After=multi-user.target
+After=network.target
+Wants=network.target
 
 [Service]
 Type=oneshot
