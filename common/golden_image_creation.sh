@@ -135,9 +135,128 @@ chmod +x $BIRDDOG_ROOT/bdc/*.sh
 chmod +x $BIRDDOG_ROOT/mesh/*.sh
 
 
-echo "[Phase 6] CLI Refresh"
+echo "[Phase 6] Installing / Refreshing BirdDog CLI"
 
-# CLI is assumed already installed — golden refresh only ensures latest scripts exist
+cat << 'EOF' > /usr/local/bin/birddog
+#!/bin/bash
+set -e
+
+ORIG_ARGS=("$@")
+
+require_root() {
+    if [ "$EUID" -ne 0 ]; then
+        echo "Elevating privileges..."
+        exec sudo "$0" "${ORIG_ARGS[@]}"
+    fi
+}
+
+source /opt/birddog/common/install_lib.sh 2>/dev/null || true
+
+update_scripts() {
+
+REMOTE=$(git ls-remote https://github.com/badandyc/BirdDog HEAD | cut -c1-7)
+LOCAL=$(cat /opt/birddog/version/COMMIT 2>/dev/null || echo none)
+
+echo "Remote commit: $REMOTE"
+echo "Local commit : $LOCAL"
+
+if [[ "$REMOTE" == "$LOCAL" ]]; then
+    echo "Already up-to-date."
+    exit 0
+fi
+
+start_install_log update
+
+curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/golden_image_creation.sh?$(date +%s)" \
+-o /opt/birddog/common/golden_image_creation.sh
+
+bash /opt/birddog/common/golden_image_creation.sh
+}
+
+verify_install() {
+
+echo ""
+echo "================================="
+echo "BirdDog Verification"
+echo "================================="
+
+if sha256sum -c /opt/birddog/version/MANIFEST >/dev/null 2>&1; then
+    echo "Script integrity : OK"
+else
+    echo "Script integrity : FAILED"
+fi
+
+systemctl is-active birddog-mesh >/dev/null 2>&1 && echo "Mesh service     : OK" || echo "Mesh service     : Missing"
+systemctl is-active nginx >/dev/null 2>&1 && echo "Web service      : OK" || true
+
+echo ""
+}
+
+echo ""
+echo "================================="
+echo "BirdDog CLI"
+echo "================================="
+
+case "$1" in
+
+install)
+require_root
+bash /opt/birddog/common/golden_image_creation.sh
+;;
+
+configure)
+require_root
+start_install_log configure
+bash /opt/birddog/common/device_configure.sh
+write_version_file configure
+generate_manifest
+;;
+
+update)
+require_root
+update_scripts
+;;
+
+verify)
+verify_install
+;;
+
+restart)
+require_root
+echo "Restarting BirdDog services..."
+systemctl restart mediamtx 2>/dev/null || true
+systemctl restart nginx 2>/dev/null || true
+systemctl restart birddog-stream 2>/dev/null || true
+;;
+
+status)
+echo ""
+cat /opt/birddog/version/VERSION 2>/dev/null || echo "Unknown"
+echo ""
+;;
+
+""|help)
+echo ""
+echo "Commands:"
+echo ""
+echo "birddog install     → install BirdDog software"
+echo "birddog configure   → run device configuration"
+echo "birddog update      → update scripts"
+echo "birddog verify      → verify node health"
+echo "birddog restart     → restart services"
+echo "birddog status      → system status"
+echo "birddog help        → show this menu"
+echo ""
+;;
+
+*)
+echo "Unknown command"
+;;
+
+esac
+EOF
+
+chmod +x /usr/local/bin/birddog
 
 
 echo "[Phase 7] Finalization"
