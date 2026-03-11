@@ -171,7 +171,7 @@ if ! ip link show $MESH_IF >/dev/null 2>&1; then
     return
 fi
 
-PEERS=$(echo "$SNAP_STATION" | grep -c '^Station')
+PEERS=$(echo "$SNAP_STATION" | grep -c 'mesh plink: ESTAB')
 
 IP=$(ip -4 addr show $MESH_IF 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)
 
