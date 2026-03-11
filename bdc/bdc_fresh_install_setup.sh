@@ -169,7 +169,7 @@ echo "Node: $NEW_HOSTNAME"
 echo "Stream: rtsp://$BDM_HOST:8554/$STREAM_NAME"
 echo "================================="
 
-echo ""
-echo "System will reboot in 10 seconds..."
-sleep 10
-reboot -f
+#echo ""
+#echo "System will reboot in 10 seconds..."
+#sleep 10
+#reboot -f
