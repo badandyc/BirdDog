@@ -10,91 +10,58 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-CURRENT_HOST=$(hostname)
 BDC_CONFIG="/opt/birddog/bdc/bdc.conf"
+
+CURRENT_HOST=$(hostname)
 
 REUSE_HOST=0
 REUSE_BDM=0
-BDM_HOST_ARG=""
-
-# -------------------------------
-# Reuse hostname
-# -------------------------------
 
 if [[ "$CURRENT_HOST" =~ ^bd[cm]-[0-9]{2}$ ]]; then
     echo ""
     echo "Existing BirdDog hostname detected: $CURRENT_HOST"
     read -p "Keep hostname? (y/n): " KEEP_HOST
-
-    if [[ "$KEEP_HOST" =~ ^[Yy]$ ]]; then
-        HOSTNAME_INPUT="$CURRENT_HOST"
-        REUSE_HOST=1
-    fi
+    [[ "$KEEP_HOST" =~ ^[Yy]$ ]] && HOSTNAME_INPUT="$CURRENT_HOST" && REUSE_HOST=1
 fi
-
-# -------------------------------
-# Reuse BDM association
-# -------------------------------
-
-if [[ -f "$BDC_CONFIG" ]]; then
-    source "$BDC_CONFIG"
-
-    echo ""
-    echo "Existing BDM link detected: $BDM_HOST"
-    read -p "Keep BDM association? (y/n): " KEEP_BDM
-
-    if [[ "$KEEP_BDM" =~ ^[Yy]$ ]]; then
-        REUSE_BDM=1
-        BDM_HOST_ARG="$BDM_HOST"
-    fi
-fi
-
-# -------------------------------
-# Hostname input if needed
-# -------------------------------
 
 if [[ "$REUSE_HOST" != "1" ]]; then
-
     read -p "Enter BirdDog hostname (bdm-## or bdc-##): " HOSTNAME_INPUT
-
-    if [[ ! "$HOSTNAME_INPUT" =~ ^bd[cm]-[0-9]{2}$ ]]; then
-        echo "Invalid hostname format. Example: bdc-01"
-        exit 1
-    fi
+    [[ ! "$HOSTNAME_INPUT" =~ ^bd[cm]-[0-9]{2}$ ]] && echo "Invalid hostname format" && exit 1
 fi
 
-NODE_NUM=$(echo "$HOSTNAME_INPUT" | grep -oE '[0-9]{2}')
-
-echo ""
-echo "Setting hostname to $HOSTNAME_INPUT"
+ROLE=$(echo "$HOSTNAME_INPUT" | cut -d- -f1)
 
 hostnamectl set-hostname "$HOSTNAME_INPUT"
-
 sed -i "s/^127.0.1.1.*/127.0.1.1   $HOSTNAME_INPUT/" /etc/hosts || \
 echo "127.0.1.1   $HOSTNAME_INPUT" >> /etc/hosts
 
-# -------------------------------
-# ROLE EXECUTION
-# -------------------------------
 
-if [[ "$HOSTNAME_INPUT" == bdc-* ]]; then
+if [[ "$ROLE" == "bdc" ]]; then
 
-    echo "[BDC] Running installer..."
-
-    if [[ "$REUSE_BDM" == "1" ]]; then
-        bash /opt/birddog/bdc/bdc_fresh_install_setup.sh "$HOSTNAME_INPUT" "$BDM_HOST_ARG"
-    else
-        bash /opt/birddog/bdc/bdc_fresh_install_setup.sh "$HOSTNAME_INPUT"
+    if [[ -f "$BDC_CONFIG" ]]; then
+        source "$BDC_CONFIG"
+        echo ""
+        echo "Existing BDM link detected: $BDM_HOST"
+        read -p "Keep BDM association? (y/n): " KEEP_BDM
+        [[ "$KEEP_BDM" =~ ^[Yy]$ ]] && REUSE_BDM=1
     fi
 
-elif [[ "$HOSTNAME_INPUT" == bdm-* ]]; then
+    if [[ "$REUSE_BDM" != "1" ]]; then
+        read -p "Enter BDM hostname (without .local): " BDM_NAME
+        BDM_HOST="${BDM_NAME}.local"
+    fi
+
+    echo "[BDC] Running installer..."
+    bash /opt/birddog/bdc/bdc_fresh_install_setup.sh "$HOSTNAME_INPUT" "$BDM_HOST"
+
+elif [[ "$ROLE" == "bdm" ]]; then
 
     echo "[BDM] Running installer..."
-
     bash /opt/birddog/bdm/bdm_initial_setup.sh "$HOSTNAME_INPUT"
     bash /opt/birddog/bdm/bdm_AP_setup.sh
     bash /opt/birddog/bdm/bdm_mediamtx_setup.sh
     bash /opt/birddog/bdm/bdm_web_setup.sh
+    bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
 
 else
     echo "Unknown role"
@@ -102,10 +69,7 @@ else
 fi
 
 echo ""
-echo "====================================="
-echo "Device configuration complete"
-echo "====================================="
-
-#echo "Rebooting in 10 seconds..."
-#sleep 10
-#reboot -f
+echo "Device configuration complete."
+echo "Rebooting in 10 seconds..."
+sleep 10
+reboot -f
