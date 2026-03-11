@@ -18,23 +18,23 @@ done
 
 echo "[1/13] Package check complete."
 
-
 echo "[2/13] Configuring sudo policy for birddog..."
 
 SUDO_FILE="/etc/sudoers.d/010_pi-nopasswd"
 
 if [ -f "$SUDO_FILE" ]; then
-    sudo sed -i '/^%birddog /d' "$SUDO_FILE"
-    sudo sed -i '/^birddog /d' "$SUDO_FILE"
+    # Comment any existing passwordless rule
+    sudo sed -i 's/^birddog ALL=(ALL) NOPASSWD: ALL/#birddog ALL=(ALL) NOPASSWD: ALL/' "$SUDO_FILE"
+
+    # Ensure password-required rule exists
+    if ! grep -q '^birddog ALL=(ALL) ALL' "$SUDO_FILE"; then
+        echo "birddog ALL=(ALL) ALL" | sudo tee -a "$SUDO_FILE" >/dev/null
+    fi
+
+    sudo chmod 440 "$SUDO_FILE"
 fi
 
-echo "%birddog ALL=(ALL) NOPASSWD: ALL" | sudo tee -a "$SUDO_FILE" >/dev/null
-echo "birddog ALL=(ALL) ALL" | sudo tee -a "$SUDO_FILE" >/dev/null
-
-sudo chmod 440 "$SUDO_FILE"
-
 echo "[2/13] Sudo policy configured."
-
 
 echo "[3/13] Creating BirdDog directory structure..."
 
@@ -43,11 +43,9 @@ sudo chmod -R 777 /opt/birddog
 
 echo "[3/13] Directory structure created."
 
-
 echo "[4/13] Switching to /opt/birddog..."
 cd /opt/birddog
 echo "[4/13] Working directory set."
-
 
 echo "[5/13] Cleaning previous scripts..."
 
@@ -57,7 +55,6 @@ rm -f /opt/birddog/mesh/*.sh || true
 rm -f /opt/birddog/common/*.sh || true
 
 echo "[5/13] Cleanup complete."
-
 
 echo "[6/13] Downloading BirdDog scripts..."
 
@@ -75,7 +72,6 @@ curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/radio
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/golden_image_creation.sh?$(date +%s)" -o common/golden_image_creation.sh
 
 echo "[6/13] Script download complete."
-
 
 echo "[7/13] Installing BirdDog CLI..."
 
