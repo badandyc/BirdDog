@@ -43,62 +43,65 @@ echo "Hostname: \$(hostname)" >> \$LOG
 
 sleep 5
 
-CONVERGED=0
+LAST_PEER_TIME=\$(date +%s)
+
+normalize_and_join() {
+
+    echo "[mesh] normalization + join attempt" >> \$LOG
+
+    ip link set wlan1 down >> \$LOG 2>&1 || true
+    iw dev wlan1 set type mp >> \$LOG 2>&1 || return
+    iw dev wlan1 set power_save off >> \$LOG 2>&1 || true
+
+    ip link set wlan1 up >> \$LOG 2>&1 || true
+    iw dev wlan1 set channel 1 HT20 >> \$LOG 2>&1 || true
+
+    sleep 1
+
+    iw dev wlan1 mesh join birddog-mesh freq 2412 >> \$LOG 2>&1 || {
+        echo "[mesh] join failed" >> \$LOG
+        sleep \$((RANDOM % 4 + 2))
+        return
+    }
+
+    ip addr replace \$MESH_IP dev wlan1 >> \$LOG 2>&1 || true
+
+    echo "[mesh] join successful" >> \$LOG
+}
 
 while true
 do
 
-    # --- wait for USB / interface ---
+    # --- interface disappearance trigger ---
     if ! ip link show wlan1 >/dev/null 2>&1; then
         echo "[mesh] wlan1 missing" >> \$LOG
-        CONVERGED=0
         sleep 2
         continue
     fi
 
-    # --- detect NOT JOINED state ---
-    if ! iw dev wlan1 info 2>/dev/null | grep -q "mesh id birddog-mesh"; then
+    # --- peer detection ---
+    PEER_FOUND=0
 
-        echo "[mesh] join required — normalizing interface" >> \$LOG
+    for slot in \$(seq 1 25)
+    do
+        TARGET="10.10.20.\$((slot*10))"
+        ping -c1 -W1 \$TARGET >/dev/null 2>&1
 
-        ip link set wlan1 down >> \$LOG 2>&1 || true
+        if ip neigh show dev wlan1 | grep -q "\$TARGET"; then
+            PEER_FOUND=1
+            LAST_PEER_TIME=\$(date +%s)
+            break
+        fi
+    done
 
-        iw dev wlan1 set type mp >> \$LOG 2>&1 || { sleep 2; continue; }
-        iw dev wlan1 set power_save off >> \$LOG 2>&1 || true
+    # --- peer floor watchdog (20s) ---
+    NOW=\$(date +%s)
+    DELTA=\$((NOW - LAST_PEER_TIME))
 
-        ip link set wlan1 up >> \$LOG 2>&1 || true
-
-        iw dev wlan1 set channel 1 HT20 >> \$LOG 2>&1 || true
-        sleep 1
-
-        # attempt join — do NOT destroy identity if it fails
-        iw dev wlan1 mesh join birddog-mesh freq 2412 >> \$LOG 2>&1 || {
-            echo "[mesh] join failed — retrying" >> \$LOG
-            sleep 3
-            continue
-        }
-
-        # assert deterministic identity ONLY after successful join
-        ip addr replace \$MESH_IP dev wlan1 >> \$LOG 2>&1 || true
-
-        echo "[mesh] join successful — restarting convergence" >> \$LOG
-        CONVERGED=0
-    fi
-
-    # --- convergence phase ---
-    if [ "\$CONVERGED" -eq 0 ]; then
-        for slot in \$(seq 1 25)
-        do
-            TARGET="10.10.20.\$((slot*10))"
-            ping -c1 -W1 \$TARGET >/dev/null 2>&1
-
-            if ip neigh show dev wlan1 | grep -q "\$TARGET"; then
-                echo "[mesh] convergence achieved with \$TARGET" >> \$LOG
-                CONVERGED=1
-                break
-            fi
-        done
-        sleep 2
+    if [ "\$PEER_FOUND" -eq 0 ] && [ "\$DELTA" -gt 20 ]; then
+        echo "[mesh] peer floor lost — rejoin required" >> \$LOG
+        normalize_and_join
+        sleep 3
         continue
     fi
 
