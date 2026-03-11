@@ -267,7 +267,7 @@ echo "================================="
 echo "BirdDog RF Scan"
 echo "================================="
 
-iw dev $MESH_IF scan 2>/dev/null | grep -E 'BSS|signal|SSID'
+timeout 6 iw dev $MESH_IF scan 2>/dev/null | grep -E 'BSS|signal|SSID'
 
 echo ""
 }
