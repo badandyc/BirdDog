@@ -35,6 +35,7 @@ cat <<EOF > /usr/local/bin/birddog-mesh-join.sh
 #!/bin/bash
 
 LOG="$RUNTIME_LOG"
+MESH_IP="$MESH_IP/24"
 
 echo "=================================" >> \$LOG
 echo "Mesh runtime start \$(date)" >> \$LOG
@@ -42,64 +43,67 @@ echo "Hostname: \$(hostname)" >> \$LOG
 
 sleep 5
 
-until ip link show wlan1 >/dev/null 2>&1
-do
-    sleep 1
-done
-
-ip link set wlan1 down >> \$LOG 2>&1 || true
-iw dev wlan1 set type mp >> \$LOG 2>&1
-ip link set wlan1 up >> \$LOG 2>&1
-
-iw dev wlan1 set power_save off >> \$LOG 2>&1 || true
-
-sleep 2
-
-iw dev wlan1 set channel 1 HT20 >> \$LOG 2>&1 || true
-
-sleep 1
-
-iw dev wlan1 mesh join birddog-mesh freq 2412 >> \$LOG 2>&1 || true
-
-ip addr flush dev wlan1 >> \$LOG 2>&1 || true
-ip addr add $MESH_IP/24 dev wlan1 >> \$LOG 2>&1
-
-echo "Starting convergence daemon..." >> \$LOG
-
 CONVERGED=0
 
-while [ "\$CONVERGED" -eq 0 ]
-do
-    for slot in \$(seq 1 25)
-    do
-        TARGET="10.10.20.\$((slot*10))"
-
-        ping -c1 -W1 \$TARGET >/dev/null 2>&1
-
-        if ip neigh show dev wlan1 | grep -q "\$TARGET"; then
-            echo "Mesh convergence achieved with \$TARGET" >> \$LOG
-            CONVERGED=1
-            break
-        fi
-    done
-
-    sleep 2
-done
-
-echo "Switching to steady warmer..." >> \$LOG
-
-(
 while true
 do
-    for slot in \$(seq 1 25)
-    do
-        ping -c1 -W1 10.10.20.\$((slot*10)) >/dev/null 2>&1
-    done
-    sleep 30
-done
-) &
+    # ---- wait for interface (USB hotplug safe) ----
+    if ! ip link show wlan1 >/dev/null 2>&1; then
+        echo "[mesh] wlan1 not present" >> \$LOG
+        sleep 2
+        continue
+    fi
 
-echo "Mesh runtime complete" >> \$LOG
+    # ---- normalize interface if not mesh ----
+    if ! iw dev wlan1 info 2>/dev/null | grep -q "type mesh"; then
+        echo "[mesh] reinitializing interface" >> \$LOG
+
+        ip link set wlan1 down >> \$LOG 2>&1 || true
+        iw dev wlan1 set type mp >> \$LOG 2>&1 || { sleep 2; continue; }
+
+        iw dev wlan1 set power_save off >> \$LOG 2>&1 || true
+
+        ip addr flush dev wlan1 >> \$LOG 2>&1 || true
+        ip link set wlan1 up >> \$LOG 2>&1 || true
+
+        iw dev wlan1 set channel 1 HT20 >> \$LOG 2>&1 || true
+        sleep 1
+
+        iw dev wlan1 mesh join birddog-mesh freq 2412 >> \$LOG 2>&1 || { sleep 3; continue; }
+
+        ip addr add \$MESH_IP dev wlan1 >> \$LOG 2>&1 || true
+
+        echo "[mesh] join complete — starting convergence" >> \$LOG
+        CONVERGED=0
+    fi
+
+    # ---- convergence phase ----
+    if [ "\$CONVERGED" -eq 0 ]; then
+        for slot in \$(seq 1 25)
+        do
+            TARGET="10.10.20.\$((slot*10))"
+            ping -c1 -W1 \$TARGET >/dev/null 2>&1
+
+            if ip neigh show dev wlan1 | grep -q "\$TARGET"; then
+                echo "[mesh] convergence achieved with \$TARGET" >> \$LOG
+                CONVERGED=1
+                break
+            fi
+        done
+    fi
+
+    # ---- steady warmer ----
+    if [ "\$CONVERGED" -eq 1 ]; then
+        for slot in \$(seq 1 25)
+        do
+            ping -c1 -W1 10.10.20.\$((slot*10)) >/dev/null 2>&1
+        done
+        sleep 30
+    else
+        sleep 2
+    fi
+
+done
 EOF
 
 chmod +x /usr/local/bin/birddog-mesh-join.sh
