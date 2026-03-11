@@ -160,8 +160,25 @@ echo ""
 echo "================================="
 echo "BirdDog Radio Layout"
 echo "================================="
+printf "%-6s %-8s %-6s %-8s %-6s\n" "IFACE" "TYPE" "CHAN" "TXPWR" "ROLE"
 
-iw dev
+for IF in $(iw dev | awk '$1=="Interface"{print $2}')
+do
+
+TYPE=$(iw dev $IF info 2>/dev/null | awk '/type/{print $2}')
+CHAN=$(iw dev $IF info 2>/dev/null | awk '/channel/{print $2}')
+TX=$(iw dev $IF info 2>/dev/null | awk '/txpower/{printf "%.0f", $2}')
+
+ROLE="-"
+
+if [[ "$IF" == "wlan0" ]]; then ROLE="MGMT"; fi
+if [[ "$IF" == "wlan1" ]]; then ROLE="MESH"; fi
+if [[ "$IF" == "wlan2" ]]; then ROLE="AP"; fi
+
+printf "%-6s %-8s %-6s %-8s %-6s\n" "$IF" "${TYPE:-?}" "${CHAN:--}" "${TX:-?}dBm" "$ROLE"
+
+done
+
 echo ""
 }
 
