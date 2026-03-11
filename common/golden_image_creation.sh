@@ -17,17 +17,21 @@ done
 
 echo "Packages ready."
 
-echo "[Phase 2] Commit State Check"
+echo "[Phase 2] Commit Resolution"
 
+if [[ -n "$BIRDDOG_COMMIT" ]]; then
+REMOTE_COMMIT="$BIRDDOG_COMMIT"
+echo "Using pinned commit from updater: $REMOTE_COMMIT"
+else
 REMOTE_COMMIT=$(git ls-remote https://github.com/badandyc/BirdDog HEAD | cut -c1-7)
+echo "Bootstrap mode — resolved HEAD commit: $REMOTE_COMMIT"
+fi
+
 LOCAL_COMMIT="none"
 [[ -f $COMMIT_FILE ]] && LOCAL_COMMIT=$(cat $COMMIT_FILE)
 
 PREVIOUS_COMMIT=$LOCAL_COMMIT
 NEW_COMMIT=$REMOTE_COMMIT
-
-echo "Remote commit: $REMOTE_COMMIT"
-echo "Local commit : $LOCAL_COMMIT"
 
 echo ""
 echo "-------------------------------------"
@@ -157,32 +161,7 @@ echo "================================="
 echo "BirdDog Radio Layout"
 echo "================================="
 
-iw dev | awk '
-$1=="Interface"{iface=$2}
-$1=="type"{type=$2}
-$1=="channel"{chan=$2}
-$1=="txpower"{tx=$2" "$3}
-$1=="ssid"{ssid=$2}
-$1=="mesh" && $2=="id"{mesh=$3}
-
-$1=="Interface" && NR>1{
-printf "%-6s %-8s %-6s %-10s %-10s\n", iface_prev,type_prev,chan_prev,tx_prev,(ssid_prev?ssid_prev:mesh_prev)
-ssid_prev=""
-mesh_prev=""
-}
-
-{
-iface_prev=iface
-type_prev=type
-chan_prev=chan
-tx_prev=tx
-ssid_prev=ssid
-mesh_prev=mesh
-}
-
-END{
-printf "%-6s %-8s %-6s %-10s %-10s\n", iface_prev,type_prev,chan_prev,tx_prev,(ssid_prev?ssid_prev:mesh_prev)
-}'
+iw dev
 echo ""
 }
 
@@ -204,7 +183,7 @@ start_install_log update
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/$REMOTE/common/golden_image_creation.sh" \
 -o /opt/birddog/common/golden_image_creation.sh
 
-bash /opt/birddog/common/golden_image_creation.sh
+BIRDDOG_COMMIT=$REMOTE bash /opt/birddog/common/golden_image_creation.sh
 }
 
 verify_install() {
