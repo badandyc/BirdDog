@@ -233,7 +233,7 @@ echo "$(hostname)"
 
 echo "$STATION" | awk '
 /^Station/ {mac=$2}
-/metric:/ {metric=$2; print mac,metric}
+/metric/ {metric=$NF; print mac,metric}
 ' | while read MAC METRIC
 do
     IP=$(echo "$NEIGH" | awk -v m="$MAC" '$5==m {print $1}')
