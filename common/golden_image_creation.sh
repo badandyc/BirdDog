@@ -3,64 +3,114 @@ set -e
 
 echo "=== BirdDog Golden Image Creation ==="
 
-echo "[1/12] Installing required packages (if missing)..."
+echo "[1/13] Installing required packages..."
 
 sudo apt update
 
 for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool; do
-    if dpkg -s "$pkg" >/dev/null 2>&1; then
-        echo " - $pkg already installed"
-    else
-        echo " - installing $pkg"
-        sudo apt install -y "$pkg"
-    fi
+    dpkg -s "$pkg" >/dev/null 2>&1 || sudo apt install -y "$pkg"
 done
 
-echo "[1/12] Package check complete."
+echo "[1/13] Package check complete."
 
 
-echo "[2/12] Creating BirdDog directory structure..."
+echo "[2/13] Creating BirdDog directory structure..."
 
-sudo mkdir -p /opt/birddog/{bdm,bdc,mesh,common,mediamtx,web,version}
+sudo mkdir -p /opt/birddog/{bdm,bdc,mesh,common,mediamtx,web,version,logs}
 sudo chmod -R 777 /opt/birddog
 
-echo "[2/12] Directory structure created."
+echo "[2/13] Directory structure ready."
 
 
-echo "[3/12] Switching to /opt/birddog..."
+echo "[3/13] Installing install_lib framework..."
+
+cat << 'EOF' | sudo tee /opt/birddog/common/install_lib.sh > /dev/null
+#!/bin/bash
+
+BIRDDOG_ROOT="/opt/birddog"
+LOG_DIR="$BIRDDOG_ROOT/logs"
+VERSION_DIR="$BIRDDOG_ROOT/version"
+
+mkdir -p "$LOG_DIR"
+mkdir -p "$VERSION_DIR"
+
+start_install_log() {
+    TYPE="$1"
+    LOGFILE="$LOG_DIR/${TYPE}_$(date +%Y%m%d_%H%M%S).log"
+    exec > >(tee -a "$LOGFILE") 2>&1
+    echo "=== BirdDog Install Session ==="
+    echo "Type: $TYPE"
+    echo "Time: $(date)"
+}
+
+write_version_file() {
+    TYPE="$1"
+    VERSION_FILE="$VERSION_DIR/VERSION"
+
+    BUILD_TIME=$(date -Iseconds)
+    COMMIT=$(git ls-remote https://github.com/badandyc/BirdDog HEAD 2>/dev/null | cut -c1-7)
+
+    [[ -z "$COMMIT" ]] && COMMIT="unknown"
+
+    cat <<EOV > "$VERSION_FILE"
+BUILD_TIME=$BUILD_TIME
+GIT_COMMIT=$COMMIT
+INSTALL_TYPE=$TYPE
+EOV
+
+    echo "Version updated."
+}
+
+generate_manifest() {
+    MANIFEST_FILE="$VERSION_DIR/MANIFEST"
+    find "$BIRDDOG_ROOT" -name "*.sh" -exec sha256sum {} \; | sort > "$MANIFEST_FILE"
+    echo "Manifest generated."
+}
+EOF
+
+sudo chmod +x /opt/birddog/common/install_lib.sh
+
+source /opt/birddog/common/install_lib.sh
+start_install_log golden
+
+echo "[3/13] install_lib ready."
+
+
+echo "[4/13] Fetching BirdDog scripts..."
+
 cd /opt/birddog
-echo "[3/12] Working directory set."
+
+fetch() {
+curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/$1?$(date +%s)" -o "$2"
+}
+
+fetch bdm/bdm_initial_setup.sh bdm/bdm_initial_setup.sh
+fetch bdm/bdm_AP_setup.sh bdm/bdm_AP_setup.sh
+fetch bdm/bdm_mediamtx_setup.sh bdm/bdm_mediamtx_setup.sh
+fetch bdm/bdm_web_setup.sh bdm/bdm_web_setup.sh
+
+fetch bdc/bdc_fresh_install_setup.sh bdc/bdc_fresh_install_setup.sh
+
+fetch mesh/add_mesh_network.sh mesh/add_mesh_network.sh
+
+fetch common/device_configure.sh common/device_configure.sh
+fetch common/radio_map_setup.sh common/radio_map_setup.sh
+fetch common/golden_image_creation.sh common/golden_image_creation.sh
+
+echo "[4/13] Script fetch complete."
 
 
-echo "[4/12] Cleaning previous scripts..."
+echo "[5/13] Setting executable permissions..."
 
-rm -f /opt/birddog/bdm/*.sh || true
-rm -f /opt/birddog/bdc/*.sh || true
-rm -f /opt/birddog/mesh/*.sh || true
-rm -f /opt/birddog/common/*.sh || true
+sudo chmod +x /opt/birddog/common/*.sh
+sudo chmod +x /opt/birddog/bdm/*.sh
+sudo chmod +x /opt/birddog/bdc/*.sh
+sudo chmod +x /opt/birddog/mesh/*.sh
 
-echo "[4/12] Cleanup complete."
-
-
-echo "[5/12] Downloading BirdDog scripts..."
-
-curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_initial_setup.sh?$(date +%s)" -o bdm/bdm_initial_setup.sh
-curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_AP_setup.sh?$(date +%s)" -o bdm/bdm_AP_setup.sh
-curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_mediamtx_setup.sh?$(date +%s)" -o bdm/bdm_mediamtx_setup.sh
-curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_web_setup.sh?$(date +%s)" -o bdm/bdm_web_setup.sh
-
-curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/bdc/bdc_fresh_install_setup.sh?$(date +%s)" -o bdc/bdc_fresh_install_setup.sh
-
-curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/mesh/add_mesh_network.sh?$(date +%s)" -o mesh/add_mesh_network.sh
-
-curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/device_configure.sh?$(date +%s)" -o common/device_configure.sh
-curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/radio_map_setup.sh?$(date +%s)" -o common/radio_map_setup.sh
-curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/golden_image_creation.sh?$(date +%s)" -o common/golden_image_creation.sh
-
-echo "[5/12] Script download complete."
+echo "[5/13] Permissions set."
 
 
-echo "[6/12] Installing BirdDog CLI..."
+echo "[6/13] Installing / Updating BirdDog CLI..."
 
 cat << 'EOF' | sudo tee /usr/local/bin/birddog > /dev/null
 #!/bin/bash
@@ -75,9 +125,11 @@ require_root() {
     fi
 }
 
+source /opt/birddog/common/install_lib.sh 2>/dev/null || true
+
 fetch_scripts() {
 
-echo "Updating BirdDog scripts..."
+start_install_log update
 
 cd /opt/birddog
 
@@ -87,7 +139,6 @@ curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_media
 curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_web_setup.sh -o bdm/bdm_web_setup.sh
 
 curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bdc/bdc_fresh_install_setup.sh -o bdc/bdc_fresh_install_setup.sh
-
 curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/mesh/add_mesh_network.sh -o mesh/add_mesh_network.sh
 
 curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/common/device_configure.sh -o common/device_configure.sh
@@ -98,6 +149,9 @@ chmod +x /opt/birddog/common/*.sh
 chmod +x /opt/birddog/bdm/*.sh
 chmod +x /opt/birddog/bdc/*.sh
 chmod +x /opt/birddog/mesh/*.sh
+
+write_version_file update
+generate_manifest
 
 echo "BirdDog update complete."
 }
@@ -110,62 +164,33 @@ echo "================================="
 case "$1" in
 
 install)
-    require_root
-    echo "Running BirdDog installer..."
-    bash /opt/birddog/common/golden_image_creation.sh
+require_root
+bash /opt/birddog/common/golden_image_creation.sh
 ;;
 
 configure)
-    require_root
-    echo "Running device configuration..."
-    bash /opt/birddog/common/device_configure.sh
+require_root
+start_install_log configure
+bash /opt/birddog/common/device_configure.sh
+write_version_file configure
+generate_manifest
 ;;
 
 update)
-    require_root
-    fetch_scripts
-;;
-
-restart)
-    require_root
-    echo "Restarting BirdDog services..."
-    systemctl restart mediamtx 2>/dev/null || true
-    systemctl restart nginx 2>/dev/null || true
-    systemctl restart birddog-stream 2>/dev/null || true
+require_root
+fetch_scripts
 ;;
 
 status)
-    echo ""
-    echo "BirdDog Version:"
-    cat /opt/birddog/version/VERSION 2>/dev/null || echo "Unknown"
-
-    echo ""
-    echo "Mesh:"
-    mesh status 2>/dev/null || echo "Mesh not configured"
-
-    echo ""
-    echo "MediaMTX:"
-    systemctl is-active mediamtx 2>/dev/null || true
-
-    echo "Web Server:"
-    systemctl is-active nginx 2>/dev/null || true
-;;
-
-""|help)
-    echo ""
-    echo "Commands:"
-    echo ""
-    echo "birddog install     → install BirdDog software"
-    echo "birddog configure   → run device configuration"
-    echo "birddog update      → update scripts"
-    echo "birddog restart     → restart services"
-    echo "birddog status      → system status"
-    echo "birddog help        → show this menu"
-    echo ""
+echo ""
+echo "Version:"
+cat /opt/birddog/version/VERSION 2>/dev/null || echo "Unknown"
+echo ""
+mesh status 2>/dev/null || echo "Mesh not configured"
 ;;
 
 *)
-    echo "Unknown command"
+echo "Unknown command"
 ;;
 
 esac
@@ -173,67 +198,26 @@ EOF
 
 sudo chmod +x /usr/local/bin/birddog
 
-echo "[6/12] BirdDog CLI installed"
+echo "[6/13] CLI ready."
 
 
-echo "[7/12] Setting executable permissions..."
+echo "[7/13] Generating version + manifest..."
 
-sudo chmod +x /opt/birddog/common/*.sh
-sudo chmod +x /opt/birddog/bdm/*.sh
-sudo chmod +x /opt/birddog/bdc/*.sh
-sudo chmod +x /opt/birddog/mesh/*.sh
+write_version_file golden
+generate_manifest
 
-echo "[7/12] Permissions applied."
+echo "[7/13] Versioning complete."
 
 
-echo "[8/12] Verifying installation..."
+echo "[8/13] Verification..."
 
-echo "--- /opt/birddog ---"
-ls -1 /opt/birddog
-
-echo "--- /opt/birddog/common ---"
-ls -1 /opt/birddog/common
-
-echo "--- /opt/birddog/bdm ---"
-ls -1 /opt/birddog/bdm
-
-echo "--- /opt/birddog/bdc ---"
-ls -1 /opt/birddog/bdc
-
-echo "--- /opt/birddog/mesh ---"
-ls -1 /opt/birddog/mesh
-
-echo "[8/12] Verification complete."
-
-
-echo "[9/12] Writing BirdDog version..."
-
-VERSION_DIR="/opt/birddog/version"
-VERSION_FILE="$VERSION_DIR/VERSION"
-
-mkdir -p $VERSION_DIR
-
-VERSION="BirdDog_$(date +%Y.%m.%d)_$(git rev-parse --short HEAD 2>/dev/null || echo manual)"
-
-echo "$VERSION" | sudo tee $VERSION_FILE > /dev/null
-
-echo "Version written:"
-cat $VERSION_FILE
-
+ls -R /opt/birddog | head -40
 
 echo ""
 echo "====================================="
 echo "BirdDog Golden Image Setup Complete"
 echo "====================================="
 echo ""
-
 echo "Next step:"
-echo ""
-echo "Run device configuration with:"
-echo ""
 echo "   birddog configure"
-echo ""
-echo "or"
-echo ""
-echo "   sudo /opt/birddog/common/device_configure.sh"
 echo ""
