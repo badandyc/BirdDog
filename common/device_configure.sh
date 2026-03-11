@@ -106,6 +106,6 @@ echo "====================================="
 echo "Device configuration complete"
 echo "====================================="
 
-echo "Rebooting in 10 seconds..."
-sleep 10
-reboot -f
+#echo "Rebooting in 10 seconds..."
+#sleep 10
+#reboot -f
