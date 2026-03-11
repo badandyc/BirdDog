@@ -112,7 +112,12 @@ EOV
 }
 
 generate_manifest() {
-find "$BIRDDOG_ROOT" -name "*.sh" -exec sha256sum {} ; | sort > "$VERSION_DIR/MANIFEST"
+find "$BIRDDOG_ROOT" -type f -name "*.sh" \
+| sort \
+| while read f
+do
+    sha256sum "$f"
+done > "$VERSION_DIR/MANIFEST"
 }
 EOF
 
