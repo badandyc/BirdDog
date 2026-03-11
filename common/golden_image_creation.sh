@@ -115,7 +115,28 @@ configure)
 
 update)
     echo "Updating BirdDog scripts..."
-    sudo birddog-update
+
+    cd /opt/birddog
+
+    curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/common/golden_image_creation.sh -o common/golden_image_creation.sh
+    curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/common/device_configure.sh -o common/device_configure.sh
+    curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/common/radio_map_setup.sh -o common/radio_map_setup.sh
+
+    curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_initial_setup.sh -o bdm/bdm_initial_setup.sh
+    curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_AP_setup.sh -o bdm/bdm_AP_setup.sh
+    curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_mediamtx_setup.sh -o bdm/bdm_mediamtx_setup.sh
+    curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_web_setup.sh -o bdm/bdm_web_setup.sh
+
+    curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bdc/bdc_fresh_install_setup.sh -o bdc/bdc_fresh_install_setup.sh
+
+    curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/mesh/add_mesh_network.sh -o mesh/add_mesh_network.sh
+
+    chmod +x /opt/birddog/common/*.sh
+    chmod +x /opt/birddog/bdm/*.sh
+    chmod +x /opt/birddog/bdc/*.sh
+    chmod +x /opt/birddog/mesh/*.sh
+
+    echo "BirdDog update complete."
 ;;
 
 restart)
