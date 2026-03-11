@@ -1,3 +1,5 @@
+curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bootstrap.sh | bash
+
 Converting this repository for all scripts to be included in golden master img
 
 rm -f ~/golden_image_creation.sh && \
