@@ -34,10 +34,7 @@ fi
 echo ""
 echo "=== System Preparation ==="
 
-echo "Setting system hostname..."
 hostnamectl set-hostname "$NEW_HOSTNAME"
-
-echo "Updating /etc/hosts..."
 
 if grep -q "^127.0.1.1" /etc/hosts; then
     sed -i "s/^127.0.1.1.*/127.0.1.1   $NEW_HOSTNAME/" /etc/hosts
@@ -46,11 +43,9 @@ else
 fi
 
 if [ -d /etc/cloud ]; then
-    echo "Disabling cloud-init..."
     touch /etc/cloud/cloud-init.disabled
 fi
 
-echo "Enabling Avahi service..."
 systemctl enable avahi-daemon
 systemctl start avahi-daemon
 
@@ -60,14 +55,8 @@ echo "=== Node Configuration ==="
 
 STREAM_NAME="cam$(printf "%02d" "$NODE_NUM")"
 
-echo "Camera stream name: $STREAM_NAME"
-
 read -p "Enter BDM hostname (without .local): " BDM_NAME
-
 BDM_HOST="${BDM_NAME}.local"
-
-echo "BDM hostname set to: $BDM_HOST"
-
 
 echo ""
 echo "=== Camera Verification Test ==="
@@ -75,26 +64,14 @@ echo "=== Camera Verification Test ==="
 TEST_FILE="/opt/birddog/test_capture.h264"
 rm -f "$TEST_FILE"
 
-echo "Capturing 5 second camera test..."
+rpicam-vid -t 5000 --nopreview -o "$TEST_FILE" || true
 
-if rpicam-vid -t 5000 --nopreview -o "$TEST_FILE"; then
-    echo "Camera capture command completed."
-else
-    echo "Camera capture command failed."
-fi
-
-if [[ -f "$TEST_FILE" ]]; then
-    FILE_SIZE=$(stat -c%s "$TEST_FILE")
-else
-    FILE_SIZE=0
-fi
-
-echo "Captured file size: $FILE_SIZE bytes"
+FILE_SIZE=$(stat -c%s "$TEST_FILE" 2>/dev/null || echo 0)
 
 if [[ "$FILE_SIZE" -gt 0 ]]; then
-    echo "Camera test: PASS (video data captured)"
+    echo "Camera test PASS"
 else
-    echo "Camera test: FAIL (no video data)"
+    echo "Camera test FAIL"
 fi
 
 
@@ -118,8 +95,6 @@ mkfifo \$PIPE
 
 trap "rm -f \$PIPE" EXIT
 
-echo "Starting camera capture..."
-
 rpicam-vid -t 0 --nopreview \
 --width \$WIDTH --height \$HEIGHT \
 --framerate \$FPS \
@@ -127,8 +102,6 @@ rpicam-vid -t 0 --nopreview \
 -o \$PIPE &
 
 sleep 1
-
-echo "Starting RTSP stream to \$BDM_HOST..."
 
 ffmpeg \
 -use_wallclock_as_timestamps 1 \
@@ -163,9 +136,13 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-
 systemctl daemon-reload
 systemctl enable birddog-stream.service
+
+
+echo ""
+echo "=== Installing mesh network ==="
+bash /opt/birddog/mesh/add_mesh_network.sh "$NEW_HOSTNAME"
 
 
 echo ""
@@ -174,11 +151,8 @@ echo "BirdDog BDC Installation Complete"
 echo "Node: $NEW_HOSTNAME"
 echo "Stream: rtsp://$BDM_HOST:8554/$STREAM_NAME"
 echo "================================="
-echo ""
-echo "Install log saved to:"
-echo "$LOG"
-echo ""
 
-echo "System will reboot in 10 seconds to finalize hostname configuration..."
+echo ""
+echo "System will reboot in 10 seconds..."
 sleep 10
 reboot -f
