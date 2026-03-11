@@ -44,9 +44,10 @@ LAST_JOIN_TIME=0
 JOIN_COOLDOWN=15
 SUSPECT_THRESHOLD=15
 RECOVERY_THRESHOLD=40
+FLAP_THRESHOLD=5
 
-CONVERGE_START=0
-RECOVERY_START=0
+declare -A PEER_FLAPS
+declare -A PEER_LAST_SEEN
 
 log_state() {
     echo "[mesh] STATE → \$1" >> \$LOG
@@ -96,7 +97,6 @@ log_state "\$STATE"
 while true
 do
 
-    # ---------------- WAIT_INTERFACE ----------------
     if ! ip link show wlan1 >/dev/null 2>&1; then
         if [[ "\$STATE" != "WAIT_INTERFACE" ]]; then
             STATE="WAIT_INTERFACE"
@@ -106,46 +106,69 @@ do
         continue
     fi
 
-    # ---------------- NORMALIZE ON FIRST APPEAR ----------------
     if [[ "\$STATE" == "WAIT_INTERFACE" ]]; then
         STATE="NORMALIZE"
         log_state "\$STATE"
         normalize_and_join
         STATE="CONVERGING"
-        CONVERGE_START=\$(date +%s)
         log_state "\$STATE"
     fi
 
-    # ---------------- PEER DETECTION ----------------
     PEER_FOUND=0
 
     for slot in \$(seq 1 25)
     do
         TARGET="10.10.20.\$((slot*10))"
-        ping -c1 -W1 \$TARGET >/dev/null 2>&1
 
-        if ip neigh show dev wlan1 | grep -q "\$TARGET"; then
-            PEER_FOUND=1
-            LAST_PEER_TIME=\$(date +%s)
-            break
-        fi
+        (
+            ping -c1 -W1 \$TARGET >/dev/null 2>&1 &&
+            echo \$TARGET > /tmp/bd_peer_hit.\$\$
+        ) &
+
+        sleep 0.02
     done
+
+    wait
+
+    if [[ -f /tmp/bd_peer_hit.\$\$ ]]; then
+        PEER_FOUND=1
+        LAST_PEER_TIME=\$(date +%s)
+
+        PEER=\$(cat /tmp/bd_peer_hit.\$\$)
+        rm -f /tmp/bd_peer_hit.\$\$
+
+        NOW=\$(date +%s)
+
+        if [[ -n "\${PEER_LAST_SEEN[\$PEER]}" ]]; then
+            GAP=\$((NOW - PEER_LAST_SEEN[\$PEER]))
+            if (( GAP > 10 )); then
+                PEER_FLAPS[\$PEER]=\$((\${PEER_FLAPS[\$PEER]:-0}+1))
+                echo "[mesh] flap detected \$PEER count=\${PEER_FLAPS[\$PEER]}" >> \$LOG
+            fi
+        fi
+
+        PEER_LAST_SEEN[\$PEER]=\$NOW
+    fi
 
     NOW=\$(date +%s)
     DELTA=\$((NOW - LAST_PEER_TIME))
 
-    # ---------------- STATE TRANSITIONS ----------------
-
     if [[ "\$STATE" == "CONVERGING" ]]; then
-
         if [[ "\$PEER_FOUND" -eq 1 ]]; then
-            DURATION=\$((NOW - CONVERGE_START))
-            echo "[mesh] convergence achieved in \${DURATION}s" >> \$LOG
             STATE="STEADY"
             log_state "\$STATE"
         fi
 
     elif [[ "\$STATE" == "STEADY" ]]; then
+
+        for p in "\${!PEER_FLAPS[@]}"; do
+            if (( PEER_FLAPS[\$p] > FLAP_THRESHOLD )); then
+                echo "[mesh] excessive flapping from \$p" >> \$LOG
+                STATE="RECOVERY"
+                log_state "\$STATE"
+                break
+            fi
+        done
 
         if (( DELTA > SUSPECT_THRESHOLD )); then
             STATE="SUSPECT"
@@ -160,7 +183,6 @@ do
 
         elif (( DELTA > RECOVERY_THRESHOLD )); then
             STATE="RECOVERY"
-            RECOVERY_START=\$(date +%s)
             log_state "\$STATE"
         fi
 
@@ -168,11 +190,8 @@ do
 
         normalize_and_join
         STATE="CONVERGING"
-        CONVERGE_START=\$(date +%s)
         log_state "\$STATE"
     fi
-
-    # ---------------- BEHAVIOR PER STATE ----------------
 
     if [[ "\$STATE" == "CONVERGING" ]]; then
         sleep 2
@@ -184,13 +203,6 @@ do
         continue
     fi
 
-    if [[ "\$STATE" == "STEADY" && \$RECOVERY_START -ne 0 ]]; then
-        DURATION=\$((NOW - RECOVERY_START))
-        echo "[mesh] recovery completed in \${DURATION}s" >> \$LOG
-        RECOVERY_START=0
-    fi
-
-    # STEADY warmer
     for peer in \$(ip neigh show dev wlan1 | awk '{print \$1}')
     do
         ping -c1 -W1 \$peer >/dev/null 2>&1
