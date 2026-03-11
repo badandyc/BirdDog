@@ -215,7 +215,7 @@ echo ""
 echo "================================="
 echo "BirdDog Mesh Runtime State"
 echo "================================="
-grep 'STATE →' "$MESH_LOG" | tail -10
+grep 'STATE' "$MESH_LOG" 2>/dev/null | tail -10 || echo "No runtime state yet"
 echo ""
 }
 
