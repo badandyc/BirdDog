@@ -56,32 +56,30 @@ do
         continue
     fi
 
-    # --- detect NOT JOINED state (true trigger) ---
+    # --- detect NOT JOINED state ---
     if ! iw dev wlan1 info 2>/dev/null | grep -q "mesh id birddog-mesh"; then
 
         echo "[mesh] join required — normalizing interface" >> \$LOG
 
         ip link set wlan1 down >> \$LOG 2>&1 || true
 
-        # always force deterministic mode
         iw dev wlan1 set type mp >> \$LOG 2>&1 || { sleep 2; continue; }
-
         iw dev wlan1 set power_save off >> \$LOG 2>&1 || true
-
-        ip addr flush dev wlan1 >> \$LOG 2>&1 || true
 
         ip link set wlan1 up >> \$LOG 2>&1 || true
 
         iw dev wlan1 set channel 1 HT20 >> \$LOG 2>&1 || true
         sleep 1
 
+        # attempt join — do NOT destroy identity if it fails
         iw dev wlan1 mesh join birddog-mesh freq 2412 >> \$LOG 2>&1 || {
             echo "[mesh] join failed — retrying" >> \$LOG
             sleep 3
             continue
         }
 
-        ip addr add \$MESH_IP dev wlan1 >> \$LOG 2>&1 || true
+        # assert deterministic identity ONLY after successful join
+        ip addr replace \$MESH_IP dev wlan1 >> \$LOG 2>&1 || true
 
         echo "[mesh] join successful — restarting convergence" >> \$LOG
         CONVERGED=0
