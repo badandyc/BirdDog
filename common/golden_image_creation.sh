@@ -159,7 +159,7 @@ mesh_status() {
 
 SNAP_STATION="$(iw dev $MESH_IF station dump 2>/dev/null)"
 SNAP_NEIGH="$(ip neigh show dev $MESH_IF 2>/dev/null)"
-STATE="$(grep 'STATE →' $MESH_LOG | tail -1 | awk '{print $4}')"
+STATE="$(grep 'STATE' "$MESH_LOG" 2>/dev/null | tail -1 | awk '{print $NF}')"
 
 echo ""
 echo "================================="
