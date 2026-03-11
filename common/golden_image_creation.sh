@@ -254,7 +254,7 @@ echo "================================="
 iw dev $MESH_IF mpath dump 2>/dev/null | awk '
 /dest/ {dest=$2}
 /next hop/ {hop=$3}
-/metric/ {metric=$2; print dest,hop,metric}
+/metric/ {metric=$2; printf "%s -> %s (metric %s)\n",dest,hop,metric}
 '
 
 echo ""
