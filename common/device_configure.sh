@@ -6,8 +6,8 @@ echo "BirdDog Device Configuration"
 echo "====================================="
 
 if [ "$EUID" -ne 0 ]; then
-    echo "Run as root: sudo birddog configure"
-    exit 1
+echo "Run as root: sudo birddog configure"
+exit 1
 fi
 
 BDC_CONFIG="/opt/birddog/bdc/bdc.conf"
@@ -16,40 +16,54 @@ CURRENT_HOST=$(hostname)
 REUSE_ALL=0
 
 # --------------------------------------------------
+
 # Combined reuse detection (BDC hostname + BDM link)
+
 # --------------------------------------------------
 
 if [[ "$CURRENT_HOST" =~ ^bdc-[0-9]{2}$ && -f "$BDC_CONFIG" ]]; then
 
-    source "$BDC_CONFIG"
+```
+source "$BDC_CONFIG"
 
-    if [[ -n "$BDM_HOST" ]]; then
-        echo ""
-        echo "Existing configuration detected:"
-        echo "BDC Hostname : $CURRENT_HOST"
-        echo "BDM Host     : $BDM_HOST"
-        echo ""
-        read -p "Keep current BDC and BDM settings? (y/n): " KEEP_ALL
+if [[ -n "$BDM_HOST" ]]; then
+    echo ""
+    echo "Existing configuration detected:"
+    echo "BDC Hostname : $CURRENT_HOST"
+    echo "BDM Host     : $BDM_HOST"
+    echo ""
+    read -p "Keep current BDC and BDM settings? (y/n): " KEEP_ALL
 
-        if [[ "$KEEP_ALL" =~ ^[Yy]$ ]]; then
-            HOSTNAME_INPUT="$CURRENT_HOST"
-            REUSE_ALL=1
-        fi
+    if [[ "$KEEP_ALL" =~ ^[Yy]$ ]]; then
+        HOSTNAME_INPUT="$CURRENT_HOST"
+        REUSE_ALL=1
     fi
+fi
+```
+
 fi
 
 # --------------------------------------------------
-# New hostname entry + validation
+
+# New hostname entry + validation loop
+
 # --------------------------------------------------
 
 if [[ "$REUSE_ALL" != "1" ]]; then
 
+```
+while true
+do
     read -p "Enter BirdDog hostname (bdm-## or bdc-##): " HOSTNAME_INPUT
 
-    if [[ ! "$HOSTNAME_INPUT" =~ ^bd[cm]-[0-9]{2}$ ]]; then
-        echo "Invalid hostname format (must be bdm-01 or bdc-01)"
-        exit 1
+    if [[ "$HOSTNAME_INPUT" =~ ^bd[cm]-[0-9]{2}$ ]]; then
+        break
     fi
+
+    echo "Invalid hostname format (must be bdm-01 or bdc-01)"
+done
+```
+
 fi
 
 ROLE=$(echo "$HOSTNAME_INPUT" | cut -d- -f1)
@@ -62,13 +76,28 @@ echo "Setting hostname to $HOSTNAME_INPUT"
 hostnamectl set-hostname "$HOSTNAME_INPUT"
 
 # --------------------------------------------------
-# FIX 1 — disable cloud-init host overwrite
+
+# disable cloud-init host overwrite (safe)
+
 # --------------------------------------------------
 
+if [ -f /etc/cloud/cloud.cfg ]; then
 sed -i 's/^manage_etc_hosts:.*/manage_etc_hosts: false/' /etc/cloud/cloud.cfg || true
+fi
 
 # --------------------------------------------------
-# FIX 2 — deterministic mesh hosts table
+
+# reset avahi state after hostname change
+
+# --------------------------------------------------
+
+systemctl restart avahi-daemon 2>/dev/null || true
+rm -rf /var/lib/avahi-daemon/* 2>/dev/null || true
+
+# --------------------------------------------------
+
+# deterministic mesh hosts table (BDC + BDM namespace)
+
 # --------------------------------------------------
 
 TMP_HOSTS="/tmp/birddog_hosts"
@@ -82,69 +111,98 @@ ff02::1 ip6-allnodes
 ff02::2 ip6-allrouters
 
 # BirdDog Mesh Nodes
+
 EOF
 
 for slot in $(seq 1 25)
 do
-    IP="10.10.20.$((slot*10))"
-    NAME="bdc-$(printf "%02d" $slot)"
-    echo "$IP $NAME" >> $TMP_HOSTS
+IP="10.10.20.$((slot*10))"
+BDC_NAME="bdc-$(printf "%02d" $slot)"
+BDM_NAME="bdm-$(printf "%02d" $slot)"
+
+```
+echo "$IP $BDC_NAME" >> $TMP_HOSTS
+echo "$IP $BDM_NAME" >> $TMP_HOSTS
+```
+
 done
 
 cp $TMP_HOSTS /etc/hosts
 
 # --------------------------------------------------
+
 # ROLE: BDC
+
 # --------------------------------------------------
 
 if [[ "$ROLE" == "bdc" ]]; then
 
-    if [[ "$REUSE_ALL" == "1" ]]; then
-        echo ""
-        echo "[BDC] Reusing existing configuration..."
-    else
-        read -p "Enter BDM hostname (without .local): " BDM_NAME
+```
+if [[ "$REUSE_ALL" == "1" ]]; then
+    echo ""
+    echo "[BDC] Reusing existing configuration..."
+else
+    read -p "Enter BDM hostname (without .local): " BDM_NAME
 
-        if [[ ! "$BDM_NAME" =~ ^bdm-[0-9]{2}$ ]]; then
-            echo "Invalid BDM hostname format"
-            exit 1
-        fi
-
-        BDM_HOST="${BDM_NAME}.local"
+    if [[ ! "$BDM_NAME" =~ ^bdm-[0-9]{2}$ ]]; then
+        echo "Invalid BDM hostname format"
+        exit 1
     fi
 
-    echo ""
-    echo "[BDC] Running installer..."
-    bash /opt/birddog/bdc/bdc_fresh_install_setup.sh \
-        "$HOSTNAME_INPUT" \
-        "$BDM_HOST" \
-        "$STREAM_NAME"
+    BDM_HOST="${BDM_NAME}.local"
+fi
 
-    echo ""
-    echo "[BDC] Installing mesh..."
-    bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
+echo ""
+echo "[BDC] Running installer..."
+bash /opt/birddog/bdc/bdc_fresh_install_setup.sh \
+    "$HOSTNAME_INPUT" \
+    "$BDM_HOST" \
+    "$STREAM_NAME"
+
+echo ""
+echo "[BDC] Installing mesh..."
+bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
+
+sleep 2
+
+if ! systemctl is-active --quiet birddog-mesh.service; then
+    echo "ERROR: Mesh service failed to start"
+    exit 1
+fi
+```
 
 # --------------------------------------------------
+
 # ROLE: BDM
+
 # --------------------------------------------------
 
 elif [[ "$ROLE" == "bdm" ]]; then
 
-    echo ""
-    echo "[BDM] Running installer..."
+```
+echo ""
+echo "[BDM] Running installer..."
 
-    bash /opt/birddog/bdm/bdm_initial_setup.sh "$HOSTNAME_INPUT"
-    bash /opt/birddog/bdm/bdm_AP_setup.sh
-    bash /opt/birddog/bdm/bdm_mediamtx_setup.sh
-    bash /opt/birddog/bdm/bdm_web_setup.sh
+bash /opt/birddog/bdm/bdm_initial_setup.sh "$HOSTNAME_INPUT"
+bash /opt/birddog/bdm/bdm_AP_setup.sh
+bash /opt/birddog/bdm/bdm_mediamtx_setup.sh
+bash /opt/birddog/bdm/bdm_web_setup.sh
 
-    echo ""
-    echo "[BDM] Installing mesh..."
-    bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
+echo ""
+echo "[BDM] Installing mesh..."
+bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
+
+sleep 2
+
+if ! systemctl is-active --quiet birddog-mesh.service; then
+    echo "ERROR: Mesh service failed to start"
+    exit 1
+fi
+```
 
 else
-    echo "Unknown role"
-    exit 1
+echo "Unknown role"
+exit 1
 fi
 
 echo ""
