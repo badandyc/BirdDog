@@ -177,7 +177,7 @@ PEERS=$(echo "$SNAP_STATION" | grep -c 'mesh plink: ESTAB')
 IP=$(ip -4 addr show $MESH_IF 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)
 
 echo "Node          : $(hostname)"
-echo "Runtime State : ${STATE:-UNKNOWN}"
+echo "Runtime State : $STATE"
 echo "Mesh IP       : ${IP:-NONE}"
 echo "Peers         : $PEERS"
 echo ""
