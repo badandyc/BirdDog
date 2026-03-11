@@ -66,6 +66,13 @@ cat << 'EOF' | sudo tee /usr/local/bin/birddog > /dev/null
 #!/bin/bash
 set -e
 
+require_root() {
+    if [ "$EUID" -ne 0 ]; then
+        echo "Elevating privileges..."
+        exec sudo "$0" "$@"
+    fi
+}
+
 fetch_scripts() {
 
 echo "Updating BirdDog scripts..."
@@ -101,24 +108,28 @@ echo "================================="
 case "$1" in
 
 install)
+    require_root "$@"
     echo "Running BirdDog installer..."
-    sudo bash /opt/birddog/common/golden_image_creation.sh
+    bash /opt/birddog/common/golden_image_creation.sh
 ;;
 
 configure)
+    require_root "$@"
     echo "Running device configuration..."
-    sudo bash /opt/birddog/common/device_configure.sh
+    bash /opt/birddog/common/device_configure.sh
 ;;
 
 update)
+    require_root "$@"
     fetch_scripts
 ;;
 
 restart)
+    require_root "$@"
     echo "Restarting BirdDog services..."
-    sudo systemctl restart mediamtx 2>/dev/null || true
-    sudo systemctl restart nginx 2>/dev/null || true
-    sudo systemctl restart birddog-stream 2>/dev/null || true
+    systemctl restart mediamtx 2>/dev/null || true
+    systemctl restart nginx 2>/dev/null || true
+    systemctl restart birddog-stream 2>/dev/null || true
 ;;
 
 status)
