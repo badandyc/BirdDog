@@ -121,12 +121,6 @@ EOF
 systemctl daemon-reload
 systemctl enable birddog-stream.service
 
-
-echo ""
-echo "=== Installing Mesh Subsystem ==="
-bash /opt/birddog/mesh/add_mesh_network.sh "$NEW_HOSTNAME"
-
-
 echo ""
 echo "================================="
 echo "BirdDog BDC Installation Complete"
