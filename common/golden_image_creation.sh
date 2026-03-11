@@ -152,6 +152,147 @@ require_root() {
 
 source /opt/birddog/common/install_lib.sh 2>/dev/null || true
 
+MESH_IF="wlan1"
+MESH_LOG="/opt/birddog/mesh/mesh_runtime.log"
+
+mesh_status() {
+
+SNAP_STATION="$(iw dev $MESH_IF station dump 2>/dev/null)"
+SNAP_NEIGH="$(ip neigh show dev $MESH_IF 2>/dev/null)"
+STATE="$(grep 'STATE →' $MESH_LOG | tail -1 | awk '{print $4}')"
+
+echo ""
+echo "================================="
+echo "BirdDog Mesh Status"
+echo "================================="
+
+if ! ip link show $MESH_IF >/dev/null 2>&1; then
+    echo "Interface     : MISSING"
+    return
+fi
+
+PEERS=$(echo "$SNAP_STATION" | grep -c '^Station')
+
+IP=$(ip -4 addr show $MESH_IF 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1)
+
+echo "Node          : $(hostname)"
+echo "Runtime State : ${STATE:-UNKNOWN}"
+echo "Mesh IP       : ${IP:-NONE}"
+echo "Peers         : $PEERS"
+echo ""
+}
+
+mesh_peers() {
+
+STATION="$(iw dev $MESH_IF station dump 2>/dev/null)"
+NEIGH="$(ip neigh show dev $MESH_IF 2>/dev/null)"
+
+echo ""
+echo "================================="
+echo "BirdDog Mesh Peers"
+echo "================================="
+
+printf "%-10s %-15s %-8s %-8s %-8s\n" "Node" "IP" "Signal" "Rate" "Metric"
+
+echo "$STATION" | awk '
+/^Station/ {mac=$2}
+/signal:/ {sig=$2}
+/tx bitrate:/ {rate=$3}
+/metric:/ {metric=$2; print mac,sig,rate,metric}
+' | while read MAC SIG RATE METRIC
+do
+    IP=$(echo "$NEIGH" | awk -v m="$MAC" '$5==m {print $1}')
+    NAME=$(getent hosts "$IP" | awk '{print $2}')
+    printf "%-10s %-15s %-8s %-8s %-8s\n" "${NAME:-$MAC}" "${IP:-?}" "$SIG" "$RATE" "$METRIC"
+done | sort -k5 -n
+
+echo ""
+}
+
+mesh_state() {
+echo ""
+echo "================================="
+echo "BirdDog Mesh Runtime State"
+echo "================================="
+grep 'STATE →' "$MESH_LOG" | tail -10
+echo ""
+}
+
+mesh_map() {
+
+STATION="$(iw dev $MESH_IF station dump 2>/dev/null)"
+NEIGH="$(ip neigh show dev $MESH_IF 2>/dev/null)"
+
+echo ""
+echo "================================="
+echo "BirdDog Mesh Map"
+echo "================================="
+
+echo "$(hostname)"
+
+echo "$STATION" | awk '
+/^Station/ {mac=$2}
+/metric:/ {metric=$2; print mac,metric}
+' | while read MAC METRIC
+do
+    IP=$(echo "$NEIGH" | awk -v m="$MAC" '$5==m {print $1}')
+    NAME=$(getent hosts "$IP" | awk '{print $2}')
+    echo " ├─ ${NAME:-$MAC} (metric $METRIC)"
+done | sort -k4 -n
+
+echo ""
+}
+
+mesh_graph() {
+
+echo ""
+echo "================================="
+echo "BirdDog Mesh Graph"
+echo "================================="
+
+iw dev $MESH_IF mpath dump 2>/dev/null | awk '
+/dest/ {dest=$2}
+/next hop/ {hop=$3}
+/metric/ {metric=$2; print dest,hop,metric}
+'
+
+echo ""
+}
+
+mesh_scan() {
+
+echo ""
+echo "================================="
+echo "BirdDog RF Scan"
+echo "================================="
+
+iw dev $MESH_IF scan 2>/dev/null | grep -E 'BSS|signal|SSID'
+
+echo ""
+}
+
+mesh_debug() {
+
+echo "===== IP ====="
+ip addr show $MESH_IF
+
+echo ""
+echo "===== STATION ====="
+iw dev $MESH_IF station dump
+
+echo ""
+echo "===== NEIGH ====="
+ip neigh show dev $MESH_IF
+
+echo ""
+echo "===== ROUTES ====="
+iw dev $MESH_IF mpath dump 2>/dev/null
+
+echo ""
+echo "===== LOG ====="
+tail -20 $MESH_LOG
+}
+
 update_scripts() {
 
 REMOTE=$(git ls-remote https://github.com/badandyc/BirdDog HEAD | cut -c1-7)
@@ -187,8 +328,8 @@ else
 fi
 
 if systemctl is-active birddog-mesh.service >/dev/null 2>&1 && \
-   ip link show wlan1 >/dev/null 2>&1 && \
-   iw dev wlan1 info 2>/dev/null | grep -q "mesh id birddog-mesh"; then
+   ip link show $MESH_IF >/dev/null 2>&1 && \
+   iw dev $MESH_IF info 2>/dev/null | grep -q "mesh id birddog-mesh"; then
     echo "Mesh service     : OK"
 else
     echo "Mesh service     : DOWN"
@@ -205,6 +346,19 @@ echo "BirdDog CLI"
 echo "================================="
 
 case "$1" in
+
+mesh)
+case "$2" in
+status) mesh_status ;;
+peers) mesh_peers ;;
+state) mesh_state ;;
+map) mesh_map ;;
+graph) mesh_graph ;;
+scan) mesh_scan ;;
+debug) mesh_debug ;;
+*) echo "mesh commands: status | peers | state | map | graph | scan | debug" ;;
+esac
+;;
 
 install)
 require_root
@@ -230,41 +384,29 @@ verify_install
 
 restart)
 require_root
-echo "Restarting BirdDog services..."
 systemctl restart mediamtx 2>/dev/null || true
 systemctl restart nginx 2>/dev/null || true
 systemctl restart birddog-stream 2>/dev/null || true
 ;;
 
 status)
-echo ""
 cat /opt/birddog/version/VERSION 2>/dev/null || echo "Unknown"
-echo ""
-;;
-
-""|help)
-echo ""
-echo "Commands:"
-echo ""
-echo "birddog install     → re-run baseline installer"
-echo "birddog configure   → run device [BDM/BDC] configuration"
-echo "birddog update      → update scripts"
-echo "birddog verify      → verify node health"
-echo "birddog restart     → restart services"
-echo "birddog status      → system status"
-echo "birddog help        → show this menu"
-echo ""
 ;;
 
 *)
-echo "Unknown command"
+echo "Commands:"
+echo " birddog mesh status|peers|state|map|graph|scan|debug"
+echo " birddog install"
+echo " birddog configure"
+echo " birddog update"
+echo " birddog verify"
+echo " birddog restart"
+echo " birddog status"
 ;;
-
 esac
 EOF
 
 chmod +x /usr/local/bin/birddog
-
 
 echo "[Phase 7] Finalization"
 
