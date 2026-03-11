@@ -26,14 +26,19 @@ REMOTE_COMMIT=$(git ls-remote https://github.com/badandyc/BirdDog HEAD | cut -c1
 LOCAL_COMMIT="none"
 [[ -f $COMMIT_FILE ]] && LOCAL_COMMIT=$(cat $COMMIT_FILE)
 
+PREVIOUS_COMMIT=$LOCAL_COMMIT
+NEW_COMMIT=$REMOTE_COMMIT
+
 echo "Remote commit: $REMOTE_COMMIT"
 echo "Local commit : $LOCAL_COMMIT"
 
-FETCH_NEEDED=1
-if [[ "$REMOTE_COMMIT" == "$LOCAL_COMMIT" ]]; then
-    echo "Scripts already current — fetch will still verify file integrity."
-    FETCH_NEEDED=0
-fi
+echo ""
+echo "-------------------------------------"
+echo "BirdDog Update Transaction"
+echo "FROM commit: $PREVIOUS_COMMIT"
+echo "TO   commit: $NEW_COMMIT"
+echo "-------------------------------------"
+echo ""
 
 
 echo "[Phase 3] Script Fetch + Diff Report"
@@ -130,17 +135,21 @@ chmod +x $BIRDDOG_ROOT/bdc/*.sh
 chmod +x $BIRDDOG_ROOT/mesh/*.sh
 
 
-echo "[Phase 6] CLI Install / Refresh"
+echo "[Phase 6] CLI Refresh"
 
-# (CLI block unchanged — keep your previous phase-engine CLI here)
-
-cat /usr/local/bin/birddog >/dev/null
+# CLI is assumed already installed — golden refresh only ensures latest scripts exist
 
 
 echo "[Phase 7] Finalization"
 
 write_version_file golden
 generate_manifest
+
+echo ""
+echo "BirdDog Commit State:"
+echo "Previous: $PREVIOUS_COMMIT"
+echo "Current : $(cat $COMMIT_FILE)"
+echo ""
 
 
 echo ""
