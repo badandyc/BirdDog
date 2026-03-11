@@ -11,14 +11,12 @@ date
 
 NEW_HOSTNAME="$1"
 BDM_HOST="$2"
+STREAM_NAME="$3"
 
-if [[ -z "$NEW_HOSTNAME" || -z "$BDM_HOST" ]]; then
-    echo "BDC installer requires hostname and BDM hostname"
+if [[ -z "$NEW_HOSTNAME" || -z "$BDM_HOST" || -z "$STREAM_NAME" ]]; then
+    echo "BDC installer requires hostname, BDM hostname and stream name"
     exit 1
 fi
-
-NODE_NUM=$(echo "$NEW_HOSTNAME" | grep -oE '[0-9]{2}')
-STREAM_NAME="cam${NODE_NUM}"
 
 echo ""
 echo "=== Node Configuration ==="
