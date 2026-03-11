@@ -28,9 +28,7 @@ echo "[2/12] Directory structure created."
 
 
 echo "[3/12] Switching to /opt/birddog..."
-
 cd /opt/birddog
-
 echo "[3/12] Working directory set."
 
 
@@ -44,57 +42,56 @@ rm -f /opt/birddog/common/*.sh || true
 echo "[4/12] Cleanup complete."
 
 
-echo "[5/12] Downloading BDM scripts..."
+echo "[5/12] Downloading BirdDog scripts..."
 
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_initial_setup.sh?$(date +%s)" -o bdm/bdm_initial_setup.sh
-echo " - bdm_initial_setup.sh downloaded"
-
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_AP_setup.sh?$(date +%s)" -o bdm/bdm_AP_setup.sh
-echo " - bdm_AP_setup.sh downloaded"
-
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_mediamtx_setup.sh?$(date +%s)" -o bdm/bdm_mediamtx_setup.sh
-echo " - bdm_mediamtx_setup.sh downloaded"
-
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_web_setup.sh?$(date +%s)" -o bdm/bdm_web_setup.sh
-echo " - bdm_web_setup.sh downloaded"
-
-echo "[5/12] BDM scripts complete."
-
-
-echo "[6/12] Downloading BDC scripts..."
 
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/bdc/bdc_fresh_install_setup.sh?$(date +%s)" -o bdc/bdc_fresh_install_setup.sh
-echo " - bdc_fresh_install_setup.sh downloaded"
-
-echo "[6/12] BDC scripts complete."
-
-
-echo "[7/12] Downloading mesh scripts..."
 
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/mesh/add_mesh_network.sh?$(date +%s)" -o mesh/add_mesh_network.sh
-echo " - add_mesh_network.sh downloaded"
-
-echo "[7/12] Mesh scripts complete."
-
-
-echo "[8/12] Downloading common scripts..."
 
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/device_configure.sh?$(date +%s)" -o common/device_configure.sh
-echo " - device_configure.sh downloaded"
-
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/radio_map_setup.sh?$(date +%s)" -o common/radio_map_setup.sh
-echo " - radio_map_setup.sh downloaded"
-
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/main/common/golden_image_creation.sh?$(date +%s)" -o common/golden_image_creation.sh
-echo " - golden_image_creation.sh downloaded"
 
-echo "[8/12] Common scripts complete."
+echo "[5/12] Script download complete."
 
 
-echo "[9/12] Installing BirdDog CLI..."
+echo "[6/12] Installing BirdDog CLI..."
 
 cat << 'EOF' | sudo tee /usr/local/bin/birddog > /dev/null
 #!/bin/bash
+set -e
+
+fetch_scripts() {
+
+echo "Updating BirdDog scripts..."
+
+cd /opt/birddog
+
+curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_initial_setup.sh -o bdm/bdm_initial_setup.sh
+curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_AP_setup.sh -o bdm/bdm_AP_setup.sh
+curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_mediamtx_setup.sh -o bdm/bdm_mediamtx_setup.sh
+curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_web_setup.sh -o bdm/bdm_web_setup.sh
+
+curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bdc/bdc_fresh_install_setup.sh -o bdc/bdc_fresh_install_setup.sh
+
+curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/mesh/add_mesh_network.sh -o mesh/add_mesh_network.sh
+
+curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/common/device_configure.sh -o common/device_configure.sh
+curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/common/radio_map_setup.sh -o common/radio_map_setup.sh
+curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/common/golden_image_creation.sh -o common/golden_image_creation.sh
+
+chmod +x /opt/birddog/common/*.sh
+chmod +x /opt/birddog/bdm/*.sh
+chmod +x /opt/birddog/bdc/*.sh
+chmod +x /opt/birddog/mesh/*.sh
+
+echo "BirdDog update complete."
+}
 
 echo ""
 echo "================================="
@@ -114,29 +111,7 @@ configure)
 ;;
 
 update)
-    echo "Updating BirdDog scripts..."
-
-    cd /opt/birddog
-
-    curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/common/golden_image_creation.sh -o common/golden_image_creation.sh
-    curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/common/device_configure.sh -o common/device_configure.sh
-    curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/common/radio_map_setup.sh -o common/radio_map_setup.sh
-
-    curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_initial_setup.sh -o bdm/bdm_initial_setup.sh
-    curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_AP_setup.sh -o bdm/bdm_AP_setup.sh
-    curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_mediamtx_setup.sh -o bdm/bdm_mediamtx_setup.sh
-    curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bdm/bdm_web_setup.sh -o bdm/bdm_web_setup.sh
-
-    curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/bdc/bdc_fresh_install_setup.sh -o bdc/bdc_fresh_install_setup.sh
-
-    curl -fsSL https://raw.githubusercontent.com/badandyc/BirdDog/main/mesh/add_mesh_network.sh -o mesh/add_mesh_network.sh
-
-    chmod +x /opt/birddog/common/*.sh
-    chmod +x /opt/birddog/bdm/*.sh
-    chmod +x /opt/birddog/bdc/*.sh
-    chmod +x /opt/birddog/mesh/*.sh
-
-    echo "BirdDog update complete."
+    fetch_scripts
 ;;
 
 restart)
@@ -185,20 +160,20 @@ EOF
 
 sudo chmod +x /usr/local/bin/birddog
 
-echo "BirdDog CLI installed"
+echo "[6/12] BirdDog CLI installed"
 
 
-echo "[10/12] Setting executable permissions..."
+echo "[7/12] Setting executable permissions..."
 
 sudo chmod +x /opt/birddog/common/*.sh
 sudo chmod +x /opt/birddog/bdm/*.sh
 sudo chmod +x /opt/birddog/bdc/*.sh
 sudo chmod +x /opt/birddog/mesh/*.sh
 
-echo "[10/12] Permissions applied."
+echo "[7/12] Permissions applied."
 
 
-echo "[11/12] Verifying installation..."
+echo "[8/12] Verifying installation..."
 
 echo "--- /opt/birddog ---"
 ls -1 /opt/birddog
@@ -215,10 +190,10 @@ ls -1 /opt/birddog/bdc
 echo "--- /opt/birddog/mesh ---"
 ls -1 /opt/birddog/mesh
 
-echo "[11/12] Verification complete."
+echo "[8/12] Verification complete."
 
 
-echo "[12/12] Writing BirdDog version..."
+echo "[9/12] Writing BirdDog version..."
 
 VERSION_DIR="/opt/birddog/version"
 VERSION_FILE="$VERSION_DIR/VERSION"
