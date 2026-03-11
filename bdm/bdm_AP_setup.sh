@@ -12,8 +12,8 @@ echo "================================="
 date
 
 if [ "$EUID" -ne 0 ]; then
-  echo "Run as root: sudo bash /opt/birddog/bdm/bdm_AP_setup.sh"
-  exit 1
+echo "Run as root: sudo bash /opt/birddog/bdm/bdm_AP_setup.sh"
+exit 1
 fi
 
 AP_IF="wlan2"
@@ -25,37 +25,39 @@ echo ""
 echo "=== Waiting for AP adapter (${AP_IF}) ==="
 
 until ip link show ${AP_IF} >/dev/null 2>&1; do
-    echo "Waiting for ${AP_IF}..."
-    sleep 2
+echo "Waiting for ${AP_IF}..."
+sleep 2
 done
 
 echo "${AP_IF} detected"
 
+echo ""
+echo "=== Waiting for interface READY state ==="
+
+until ip link show ${AP_IF} | grep -q "state"; do
+sleep 1
+done
 
 echo ""
 echo "=== Unblocking WiFi ==="
 rfkill unblock wifi || true
 
-
 echo ""
 echo "=== Set regulatory domain ==="
 iw reg set US || true
-
+sleep 1
 
 echo ""
 echo "=== Disable NetworkManager (appliance mode) ==="
 systemctl stop NetworkManager 2>/dev/null || true
 systemctl disable NetworkManager 2>/dev/null || true
 
-
 echo ""
 echo "=== Enable systemd-networkd ==="
 systemctl enable systemd-networkd
-systemctl start systemd-networkd
-
+systemctl restart systemd-networkd
 
 mkdir -p /etc/systemd/network
-
 
 echo ""
 echo "=== Configure eth0 (DHCP for LAN access) ==="
@@ -67,7 +69,6 @@ Name=eth0
 [Network]
 DHCP=yes
 EOF
-
 
 echo ""
 echo "=== Configure ${AP_IF} (Static AP IP) ==="
@@ -81,6 +82,14 @@ Address=${AP_IP}
 ConfigureWithoutCarrier=yes
 EOF
 
+echo ""
+echo "=== Force clean AP interface state ==="
+
+ip link set ${AP_IF} down || true
+sleep 1
+iw dev ${AP_IF} set power_save off || true
+ip link set ${AP_IF} up || true
+sleep 1
 
 echo ""
 echo "=== Configure hostapd ==="
@@ -102,20 +111,17 @@ wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP
 EOF
 
-
 if grep -q "^DAEMON_CONF=" /etc/default/hostapd; then
-  sed -i "s|^DAEMON_CONF=.*|DAEMON_CONF=\"/etc/hostapd/hostapd.conf\"|" /etc/default/hostapd
+sed -i "s|^DAEMON_CONF=.*|DAEMON_CONF="/etc/hostapd/hostapd.conf"|" /etc/default/hostapd
 else
-  echo 'DAEMON_CONF="/etc/hostapd/hostapd.conf"' >> /etc/default/hostapd
+echo 'DAEMON_CONF="/etc/hostapd/hostapd.conf"' >> /etc/default/hostapd
 fi
-
 
 systemctl unmask hostapd || true
 systemctl enable hostapd
 
-
 echo ""
-echo "=== Configure hostapd startup ordering ==="
+echo "=== Configure hostapd ordering ==="
 
 mkdir -p /etc/systemd/system/hostapd.service.d
 
@@ -123,7 +129,6 @@ cat > /etc/systemd/system/hostapd.service.d/override.conf <<EOF
 [Unit]
 After=systemd-networkd.service
 EOF
-
 
 echo ""
 echo "=== Configure dnsmasq ==="
@@ -133,12 +138,11 @@ rm -f /etc/dnsmasq.conf
 
 cat > /etc/dnsmasq.conf <<EOF
 interface=${AP_IF}
-bind-dynamic
+bind-interfaces
 dhcp-range=10.10.10.50,10.10.10.150,255.255.255.0,24h
 EOF
 
 systemctl enable dnsmasq
-
 
 echo ""
 echo "=== Ensure WiFi unblocked on boot ==="
@@ -148,22 +152,26 @@ cat > /etc/systemd/system/hostapd.service.d/rfkill.conf <<EOF
 ExecStartPre=/usr/sbin/rfkill unblock wifi
 EOF
 
-
 echo ""
-echo "=== Disable WiFi power save ==="
-iw dev ${AP_IF} set power_save off || true
-
+echo "=== Restarting services with retry logic ==="
 
 systemctl daemon-reload
 
-
-echo ""
-echo "=== Restarting services ==="
-
 systemctl restart systemd-networkd
-systemctl restart hostapd
+sleep 2
+
+for attempt in 1 2 3
+do
+echo "Starting hostapd attempt $attempt"
+systemctl restart hostapd && break
+sleep 2
+done
+
 systemctl restart dnsmasq
 
+echo ""
+echo "=== Disable WiFi power save (final enforcement) ==="
+iw dev ${AP_IF} set power_save off || true
 
 echo ""
 echo "=== Verification ==="
@@ -173,20 +181,19 @@ ip addr show ${AP_IF}
 
 echo ""
 echo "--- hostapd status ---"
-systemctl status hostapd --no-pager
+systemctl is-active hostapd || echo "hostapd NOT ACTIVE"
 
 echo ""
 echo "--- dnsmasq status ---"
-systemctl status dnsmasq --no-pager
+systemctl is-active dnsmasq || echo "dnsmasq NOT ACTIVE"
 
 echo ""
-echo "--- Listening DHCP port ---"
+echo "--- DHCP port check ---"
 ss -lntup | grep 67 || true
 
 echo ""
 echo "--- WiFi interface info ---"
 iw dev ${AP_IF} info || true
-
 
 echo ""
 echo "================================="
