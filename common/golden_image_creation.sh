@@ -11,7 +11,7 @@ mkdir -p $BIRDDOG_ROOT/{bdm,bdc,mesh,common,mediamtx,web,logs,version}
 
 echo "[Phase 1] Package Assurance"
 
-sudo apt update
+#sudo apt update
 
 for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool; do
     dpkg -s "$pkg" >/dev/null 2>&1 || sudo apt install -y "$pkg"
@@ -239,8 +239,8 @@ echo ""
 echo ""
 echo "Commands:"
 echo ""
-echo "birddog install     → install BirdDog software"
-echo "birddog configure   → run device configuration"
+echo "birddog install     → re-run baseline installer"
+echo "birddog configure   → run device [BDM/BDC] configuration"
 echo "birddog update      → update scripts"
 echo "birddog verify      → verify node health"
 echo "birddog restart     → restart services"
