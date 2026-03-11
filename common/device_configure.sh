@@ -16,6 +16,10 @@ BDC_CONFIG="/opt/birddog/bdc/bdc.conf"
 REUSE_HOST=0
 REUSE_BDM=0
 
+# -------------------------------------------------
+# Existing hostname detection
+# -------------------------------------------------
+
 if [[ "$CURRENT_HOST" == bdc-* || "$CURRENT_HOST" == bdm-* ]]; then
 
     echo ""
@@ -29,7 +33,13 @@ if [[ "$CURRENT_HOST" == bdc-* || "$CURRENT_HOST" == bdm-* ]]; then
 
 fi
 
+
+# -------------------------------------------------
+# Existing BDM association detection (BDC only)
+# -------------------------------------------------
+
 if [[ -f "$BDC_CONFIG" ]]; then
+
     source "$BDC_CONFIG"
 
     echo ""
@@ -39,8 +49,13 @@ if [[ -f "$BDC_CONFIG" ]]; then
     if [[ "$KEEP_BDM" =~ ^[Yy]$ ]]; then
         REUSE_BDM=1
     fi
+
 fi
 
+
+# -------------------------------------------------
+# Hostname prompt if not reusing
+# -------------------------------------------------
 
 if [[ "$REUSE_HOST" != "1" ]]; then
 
@@ -70,9 +85,13 @@ sed -i "s/^127.0.1.1.*/127.0.1.1   $HOSTNAME_INPUT/" /etc/hosts || \
 echo "127.0.1.1   $HOSTNAME_INPUT" >> /etc/hosts
 
 
+# -------------------------------------------------
+# Role install
+# -------------------------------------------------
+
 if [[ "$HOSTNAME_INPUT" == bdc-* ]]; then
 
-    echo "[1/2] Running BDC setup..."
+    echo "[1/1] Running BDC setup..."
 
     if [[ "$REUSE_BDM" == "1" ]]; then
         bash /opt/birddog/bdc/bdc_fresh_install_setup.sh "$HOSTNAME_INPUT" "$BDM_HOST"
@@ -80,11 +99,27 @@ if [[ "$HOSTNAME_INPUT" == bdc-* ]]; then
         bash /opt/birddog/bdc/bdc_fresh_install_setup.sh "$HOSTNAME_INPUT"
     fi
 
-    echo "[2/2] Installing mesh network..."
-    bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
+elif [[ "$HOSTNAME_INPUT" == bdm-* ]]; then
 
+    echo "[1/1] Running BDM setup..."
+
+    bash /opt/birddog/bdm/bdm_initial_setup.sh "$HOSTNAME_INPUT"
+    bash /opt/birddog/bdm/bdm_AP_setup.sh
+    bash /opt/birddog/bdm/bdm_mediamtx_setup.sh
+    bash /opt/birddog/bdm/bdm_web_setup.sh
+
+else
+    echo "Invalid hostname prefix"
+    exit 1
 fi
 
+
 echo ""
+echo "====================================="
 echo "Device configuration complete"
+echo "====================================="
 echo ""
+
+echo "System will reboot in 10 seconds..."
+sleep 10
+reboot -f
