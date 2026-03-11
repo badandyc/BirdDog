@@ -145,19 +145,27 @@ bash /opt/birddog/common/golden_image_creation.sh
 
 verify_install() {
 
-echo "=== BirdDog Verification ==="
+echo ""
+echo "================================="
+echo "BirdDog Verification"
+echo "================================="
 
 if sha256sum -c /opt/birddog/version/MANIFEST >/dev/null 2>&1; then
-    echo "Script integrity: OK"
+    echo "Script integrity : OK"
 else
-    echo "Script integrity: FAILED"
+    echo "Script integrity : FAILED"
 fi
 
-systemctl is-active birddog-mesh >/dev/null 2>&1 && echo "Mesh service: OK" || echo "Mesh service: Missing"
-systemctl is-active nginx >/dev/null 2>&1 && echo "Web service: OK" || true
+systemctl is-active birddog-mesh >/dev/null 2>&1 && echo "Mesh service     : OK" || echo "Mesh service     : Missing"
+systemctl is-active nginx >/dev/null 2>&1 && echo "Web service      : OK" || true
 
-echo "============================"
+echo ""
 }
+
+echo ""
+echo "================================="
+echo "BirdDog CLI"
+echo "================================="
 
 case "$1" in
 
@@ -183,12 +191,36 @@ verify)
 verify_install
 ;;
 
+restart)
+require_root
+echo "Restarting BirdDog services..."
+systemctl restart mediamtx 2>/dev/null || true
+systemctl restart nginx 2>/dev/null || true
+systemctl restart birddog-stream 2>/dev/null || true
+;;
+
 status)
+echo ""
 cat /opt/birddog/version/VERSION 2>/dev/null || echo "Unknown"
+echo ""
+;;
+
+""|help)
+echo ""
+echo "Commands:"
+echo ""
+echo "birddog install     → install BirdDog software"
+echo "birddog configure   → run device configuration"
+echo "birddog update      → update scripts"
+echo "birddog verify      → verify node health"
+echo "birddog restart     → restart services"
+echo "birddog status      → system status"
+echo "birddog help        → show this menu"
+echo ""
 ;;
 
 *)
-echo "Commands: install | configure | update | verify | status"
+echo "Unknown command"
 ;;
 
 esac
