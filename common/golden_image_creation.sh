@@ -75,13 +75,33 @@ if [ ! -f "$MEDIAMTX_DIR/mediamtx" ]; then
 
     echo "Extracting MediaMTX..."
 
-    rm -rf "$MEDIAMTX_DIR"/*
-    tar -xzf "$MEDIAMTX_TAR" -C "$MEDIAMTX_DIR" --strip-components=1
+STAGE_DIR="/tmp/mediamtx_stage"
+rm -rf "$STAGE_DIR"
+mkdir -p "$STAGE_DIR"
 
-    chmod +x "$MEDIAMTX_DIR/mediamtx"
-    rm -f "$MEDIAMTX_TAR"
+tar -xzf "$MEDIAMTX_TAR" -C "$STAGE_DIR"
 
-    echo "MediaMTX installed successfully."
+MEDIAMTX_BIN=$(find "$STAGE_DIR" -type f -name mediamtx | head -1)
+
+if [[ -z "$MEDIAMTX_BIN" ]]; then
+    echo "ERROR: mediamtx binary not found after extraction"
+    exit 1
+fi
+
+rm -rf "$MEDIAMTX_DIR"/*
+mv "$MEDIAMTX_BIN" "$MEDIAMTX_DIR/mediamtx"
+chmod +x "$MEDIAMTX_DIR/mediamtx"
+
+# optional config copy if present
+MEDIAMTX_CFG=$(find "$STAGE_DIR" -type f -name mediamtx.yml | head -1)
+if [[ -n "$MEDIAMTX_CFG" ]]; then
+    mv "$MEDIAMTX_CFG" "$MEDIAMTX_DIR/"
+fi
+
+rm -rf "$STAGE_DIR"
+rm -f "$MEDIAMTX_TAR"
+
+echo "MediaMTX installed successfully."
 
 else
     echo "MediaMTX already present — skipping install."
