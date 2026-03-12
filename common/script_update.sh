@@ -48,6 +48,13 @@ TMP="/tmp/birddog_fetch.$$"
 
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/$REMOTE_COMMIT/$1" -o "$TMP" || exit 1
 
+# ⭐ Self-updater staging protection
+if [[ "$1" == "common/script_update.sh" ]]; then
+echo "STAGED UPDATE $1"
+sudo mv -f "$TMP" "$2.new"
+return
+fi
+
 if [[ ! -f "$2" ]]; then
 echo "NEW $1"
 sudo mv -f "$TMP" "$2"
@@ -63,6 +70,7 @@ sudo mv -f "$TMP" "$2"
 fi
 }
 
+fetch_file common/script_update.sh $BIRDDOG_ROOT/common/script_update.sh
 fetch_file bdm/bdm_initial_setup.sh $BIRDDOG_ROOT/bdm/bdm_initial_setup.sh
 fetch_file bdm/bdm_AP_setup.sh $BIRDDOG_ROOT/bdm/bdm_AP_setup.sh
 fetch_file bdm/bdm_mediamtx_setup.sh $BIRDDOG_ROOT/bdm/bdm_mediamtx_setup.sh
@@ -92,6 +100,17 @@ chmod +x $BIRDDOG_ROOT/common/*.sh
 chmod +x $BIRDDOG_ROOT/bdm/*.sh
 chmod +x $BIRDDOG_ROOT/bdc/*.sh
 chmod +x $BIRDDOG_ROOT/mesh/*.sh
+
+# --------------------------------------------------
+# Activate New Updater (Atomic)
+# --------------------------------------------------
+
+if [[ -f $BIRDDOG_ROOT/common/script_update.sh.new ]]; then
+echo "[Update] Activating new updater"
+sudo mv -f $BIRDDOG_ROOT/common/script_update.sh.new \
+           $BIRDDOG_ROOT/common/script_update.sh
+sudo chmod +x $BIRDDOG_ROOT/common/script_update.sh
+fi
 
 echo ""
 echo "BirdDog script update complete."
