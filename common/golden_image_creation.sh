@@ -229,8 +229,152 @@ chmod +x $BIRDDOG_ROOT/mesh/*.sh
 
 echo "[Phase 6] Installing / Refreshing BirdDog CLI"
 
-# (Your current working CLI block goes here unchanged)
+cat << 'EOF' > /usr/local/bin/birddog
+#!/bin/bash
+set -e
 
+ORIG_ARGS=("$@")
+
+require_root() {
+    if [ "$EUID" -ne 0 ]; then
+        echo "Elevating privileges..."
+        exec sudo "$0" "${ORIG_ARGS[@]}"
+    fi
+}
+
+source /opt/birddog/common/install_lib.sh 2>/dev/null || true
+
+show_radios() {
+
+echo ""
+echo "================================="
+echo "BirdDog Radio Layout"
+echo "================================="
+
+printf "%-6s %-8s %-6s %-8s %-6s\n" "IFACE" "TYPE" "CHAN" "TXPWR" "ROLE"
+
+for IF in wlan2 wlan1 wlan0
+do
+    if ip link show $IF >/dev/null 2>&1; then
+
+        TYPE=$(iw dev $IF info 2>/dev/null | awk '/type/ {print $2}')
+        CHAN=$(iw dev $IF info 2>/dev/null | awk '/channel/ {print $2}')
+        TX=$(iw dev $IF info 2>/dev/null | awk '/txpower/ {print int($2)"dBm"}')
+
+        ROLE="-"
+
+        if [[ "$IF" == "wlan2" ]]; then ROLE="AP"; fi
+        if [[ "$IF" == "wlan1" ]]; then ROLE="MESH"; fi
+        if [[ "$IF" == "wlan0" ]]; then ROLE="MGMT"; fi
+
+        printf "%-6s %-8s %-6s %-8s %-6s\n" "$IF" "${TYPE:-?}" "${CHAN:--}" "${TX:-?}" "$ROLE"
+    fi
+done
+
+echo ""
+}
+
+update_scripts() {
+
+REMOTE=$(git ls-remote https://github.com/badandyc/BirdDog HEAD | cut -c1-7)
+LOCAL=$(cat /opt/birddog/version/COMMIT 2>/dev/null || echo none)
+
+echo "Remote commit: $REMOTE"
+echo "Local commit : $LOCAL"
+
+if [[ "$REMOTE" == "$LOCAL" ]]; then
+    echo "Already up-to-date."
+    exit 0
+fi
+
+start_install_log update
+
+curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/$REMOTE/common/golden_image_creation.sh" \
+-o /opt/birddog/common/golden_image_creation.sh
+
+bash /opt/birddog/common/golden_image_creation.sh
+}
+
+verify_install() {
+
+echo ""
+echo "================================="
+echo "BirdDog Verification"
+echo "================================="
+
+if sha256sum -c /opt/birddog/version/MANIFEST >/dev/null 2>&1; then
+    echo "Script integrity : OK"
+else
+    echo "Script integrity : FAILED"
+fi
+
+if systemctl is-active birddog-mesh.service >/dev/null 2>&1; then
+    echo "Mesh service     : OK"
+else
+    echo "Mesh service     : DOWN"
+fi
+
+echo ""
+}
+
+case "$1" in
+
+radios)
+show_radios
+;;
+
+install)
+require_root
+bash /opt/birddog/common/golden_image_creation.sh
+;;
+
+configure)
+require_root
+start_install_log configure
+bash /opt/birddog/common/device_configure.sh
+write_version_file configure
+generate_manifest
+;;
+
+update)
+require_root
+update_scripts
+;;
+
+verify)
+verify_install
+;;
+
+verify-node)
+bash /opt/birddog/common/verify_node.sh
+;;
+
+restart)
+require_root
+systemctl restart mediamtx 2>/dev/null || true
+systemctl restart nginx 2>/dev/null || true
+systemctl restart birddog-stream 2>/dev/null || true
+;;
+
+status)
+cat /opt/birddog/version/VERSION 2>/dev/null || echo "Unknown"
+;;
+
+*)
+echo "Commands:"
+echo " birddog radios"
+echo " birddog install"
+echo " birddog configure"
+echo " birddog update"
+echo " birddog verify"
+echo " birddog verify-node"
+echo " birddog restart"
+echo " birddog status"
+;;
+esac
+EOF
+
+chmod +x /usr/local/bin/birddog
 
 echo "[Phase 7] Finalization"
 
