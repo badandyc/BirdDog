@@ -176,7 +176,7 @@ chmod +x $BIRDDOG_ROOT/bdc/*.sh
 chmod +x $BIRDDOG_ROOT/mesh/*.sh
 
 # --------------------------------------------------
-# ⭐ REAL PHASE 6 CLI
+# Phase 6 — Install / Refresh BirdDog CLI
 # --------------------------------------------------
 
 echo "[Phase 6] Installing BirdDog CLI"
@@ -185,34 +185,81 @@ cat << 'EOF' > /usr/local/bin/birddog
 #!/bin/bash
 set -e
 
+show_help() {
+
+echo ""
+echo "================================="
+echo "         BirdDog CLI"
+echo "================================="
+echo ""
+echo "System:"
+echo "  birddog install      Full or Refresh golden image"
+echo "  birddog configure    Configure node role (BDC / BDM)"
+echo "  birddog update       Refresh scripts from repository"
+echo ""
+echo "Verification:"
+echo "  birddog verify       Check mesh + services"
+echo "  birddog verify-node  Show node identity"
+echo ""
+echo "Operations:"
+echo "  birddog radios       Show radio layout + roles"
+echo "  birddog restart      Restart BirdDog services"
+echo "  birddog status       Show install + commit state"
+echo ""
+echo "================================="
+echo ""
+}
+
 case "$1" in
+
 radios)
-/opt/birddog/common/radio_map_setup.sh ;;
-install)
-bash /opt/birddog/common/golden_image_creation.sh ;;
-configure)
-sudo bash /opt/birddog/common/device_configure.sh ;;
-update)
-sudo BIRDDOG_MODE=refresh bash /opt/birddog/common/golden_image_creation.sh ;;
-verify)
-systemctl is-active birddog-mesh.service ;;
-verify-node)
-hostname ;;
-restart)
-systemctl restart mediamtx nginx birddog-stream 2>/dev/null || true ;;
-status)
-cat /opt/birddog/version/VERSION 2>/dev/null || true ;;
-*)
-echo "Commands:"
-echo " birddog radios"
-echo " birddog install"
-echo " birddog configure"
-echo " birddog update"
-echo " birddog verify"
-echo " birddog verify-node"
-echo " birddog restart"
-echo " birddog status"
+bash /opt/birddog/common/radio_map_setup.sh
 ;;
+
+install)
+bash /opt/birddog/common/golden_image_creation.sh
+;;
+
+configure)
+sudo bash /opt/birddog/common/device_configure.sh
+;;
+
+update)
+sudo BIRDDOG_MODE=refresh bash /opt/birddog/common/golden_image_creation.sh
+;;
+
+verify)
+echo ""
+echo "Mesh Service:"
+systemctl is-active birddog-mesh.service || true
+echo ""
+;;
+
+verify-node)
+echo ""
+echo "Node:"
+hostname
+echo ""
+;;
+
+restart)
+sudo systemctl restart mediamtx 2>/dev/null || true
+sudo systemctl restart nginx 2>/dev/null || true
+sudo systemctl restart birddog-stream 2>/dev/null || true
+echo "Services restarted."
+;;
+
+status)
+echo ""
+echo "Version:"
+cat /opt/birddog/version/VERSION 2>/dev/null || echo "Unknown"
+echo ""
+;;
+
+*)
+show_help
+;;
+
 esac
 EOF
 
