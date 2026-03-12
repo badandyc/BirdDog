@@ -251,26 +251,32 @@ echo "================================="
 echo "BirdDog Radio Layout"
 echo "================================="
 
-printf "%-6s %-8s %-6s %-8s %-6s\n" "IFACE" "TYPE" "CHAN" "TXPWR" "ROLE"
+iw dev | awk '
+$1=="Interface"{iface=$2}
+$1=="type"{type=$2}
+$1=="channel"{chan=$2}
+$1=="txpower"{tx=$2" "$3}
+$1=="ssid"{ssid=$2}
+$1=="mesh" && $2=="id"{mesh=$3}
 
-for IF in wlan2 wlan1 wlan0
-do
-    if ip link show $IF >/dev/null 2>&1; then
+$1=="Interface" && NR>1{
+printf "%-6s %-8s %-6s %-10s %-10s\n", iface_prev,type_prev,chan_prev,tx_prev,(ssid_prev?ssid_prev:mesh_prev)
+ssid_prev=""
+mesh_prev=""
+}
 
-        TYPE=$(iw dev $IF info 2>/dev/null | awk '/type/ {print $2}')
-        CHAN=$(iw dev $IF info 2>/dev/null | awk '/channel/ {print $2}')
-        TX=$(iw dev $IF info 2>/dev/null | awk '/txpower/ {print int($2)"dBm"}')
+{
+iface_prev=iface
+type_prev=type
+chan_prev=chan
+tx_prev=tx
+ssid_prev=ssid
+mesh_prev=mesh
+}
 
-        ROLE="-"
-
-        if [[ "$IF" == "wlan2" ]]; then ROLE="AP"; fi
-        if [[ "$IF" == "wlan1" ]]; then ROLE="MESH"; fi
-        if [[ "$IF" == "wlan0" ]]; then ROLE="MGMT"; fi
-
-        printf "%-6s %-8s %-6s %-8s %-6s\n" "$IF" "${TYPE:-?}" "${CHAN:--}" "${TX:-?}" "$ROLE"
-    fi
-done
-
+END{
+printf "%-6s %-8s %-6s %-10s %-10s\n", iface_prev,type_prev,chan_prev,tx_prev,(ssid_prev?ssid_prev:mesh_prev)
+}'
 echo ""
 }
 
@@ -317,6 +323,28 @@ fi
 echo ""
 }
 
+verify_node() {
+
+echo ""
+echo "================================="
+echo "BirdDog Node Health"
+echo "================================="
+
+echo "Hostname:"
+hostname
+
+echo ""
+echo "Mesh IP:"
+ip -4 addr show wlan1 2>/dev/null | awk '/inet /{print $2}' || echo "Missing"
+
+echo ""
+systemctl is-active birddog-mesh.service >/dev/null 2>&1 && echo "Mesh      : OK" || echo "Mesh      : DOWN"
+systemctl is-active mediamtx >/dev/null 2>&1 && echo "MediaMTX  : OK" || echo "MediaMTX  : DOWN"
+systemctl is-active nginx >/dev/null 2>&1 && echo "Web       : OK" || echo "Web       : DOWN"
+
+echo ""
+}
+
 case "$1" in
 
 radios)
@@ -346,7 +374,7 @@ verify_install
 ;;
 
 verify-node)
-bash /opt/birddog/common/verify_node.sh
+verify_node
 ;;
 
 restart)
