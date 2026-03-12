@@ -22,30 +22,77 @@ echo "Packages ready."
 
 echo "[Phase 1.5] Installing MediaMTX binary"
 
-MEDIAMTX_DIR="$BIRDDOG_ROOT/mediamtx"
-MEDIAMTX_BIN="$MEDIAMTX_DIR/mediamtx"
+MEDIAMTX_DIR="/opt/birddog/mediamtx"
+MEDIAMTX_TAR="/tmp/mediamtx.tar.gz"
 
-if [ ! -f "$MEDIAMTX_BIN" ]; then
+# --------------------------------------------------
+# Mode selection
+# --------------------------------------------------
+# Default = pinned (fleet safe)
+# Override in lab:
+#   sudo MEDIAMTX_MODE=latest ./golden_image_creation.sh
+# --------------------------------------------------
 
-echo "Downloading MediaMTX..."
+MEDIAMTX_MODE="${MEDIAMTX_MODE:-pinned}"
 
-TMP="/tmp/mediamtx.tar.gz"
+# Known-good fleet version (UPDATE THIS ONLY AFTER VALIDATION)
+MEDIAMTX_VERSION="v1.8.4"
 
-curl -L https://github.com/bluenviron/mediamtx/releases/latest/download/mediamtx_linux_armv7.tar.gz -o "$TMP"
+mkdir -p "$MEDIAMTX_DIR"
 
-tar -xzf "$TMP" -C /tmp
+if [ ! -f "$MEDIAMTX_DIR/mediamtx" ]; then
 
-mv /tmp/mediamtx "$MEDIAMTX_BIN"
+    echo "MediaMTX mode: $MEDIAMTX_MODE"
 
-chmod +x "$MEDIAMTX_BIN"
+    if [[ "$MEDIAMTX_MODE" == "latest" ]]; then
 
-rm -rf /tmp/mediamtx*
-rm -f "$TMP"
+        echo "Resolving latest MediaMTX release..."
 
-echo "MediaMTX installed."
+        MEDIAMTX_URL=$(curl -fsSL https://api.github.com/repos/bluenviron/mediamtx/releases/latest \
+            | grep browser_download_url \
+            | grep linux_arm64.tar.gz \
+            | cut -d '"' -f 4)
+
+        if [[ -z "$MEDIAMTX_URL" ]]; then
+            echo "ERROR: Could not resolve latest MediaMTX URL"
+            exit 1
+        fi
+
+    else
+
+        echo "Using pinned MediaMTX version: $MEDIAMTX_VERSION"
+
+        MEDIAMTX_URL="https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION#v}_linux_arm64.tar.gz"
+
+    fi
+
+    echo "Downloading:"
+    echo "$MEDIAMTX_URL"
+
+    curl -fL "$MEDIAMTX_URL" -o "$MEDIAMTX_TAR"
+
+    if [ ! -s "$MEDIAMTX_TAR" ]; then
+        echo "ERROR: MediaMTX download failed (empty file)"
+        exit 1
+    fi
+
+    if ! file "$MEDIAMTX_TAR" | grep -q gzip; then
+        echo "ERROR: Downloaded MediaMTX archive is not valid gzip"
+        exit 1
+    fi
+
+    echo "Extracting MediaMTX..."
+
+    tar -xzf "$MEDIAMTX_TAR" -C "$MEDIAMTX_DIR" --strip-components=1
+
+    chmod +x "$MEDIAMTX_DIR/mediamtx"
+
+    rm -f "$MEDIAMTX_TAR"
+
+    echo "MediaMTX installed successfully."
 
 else
-echo "MediaMTX already present."
+    echo "MediaMTX already present — skipping install."
 fi
 
 echo "[Phase 2] Commit State Check"
