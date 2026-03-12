@@ -280,4 +280,3 @@ chmod +x /usr/local/bin/birddog
 echo "[Phase 7] Finalization"
 echo "Golden install complete."
 echo ""
-```
