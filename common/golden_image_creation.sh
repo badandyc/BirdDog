@@ -147,6 +147,7 @@ fetch_file mesh/add_mesh_network.sh $BIRDDOG_ROOT/mesh/add_mesh_network.sh
 fetch_file common/device_configure.sh $BIRDDOG_ROOT/common/device_configure.sh
 fetch_file common/radio_map_setup.sh $BIRDDOG_ROOT/common/radio_map_setup.sh
 fetch_file common/oobe_reset.sh $BIRDDOG_ROOT/common/oobe_reset.sh
+fetch_file common/oobe_reset.sh $BIRDDOG_ROOT/common/script_update.sh
 fetch_file common/golden_image_creation.sh $BIRDDOG_ROOT/common/golden_image_creation.sh
 
 echo "$REMOTE_COMMIT" > $COMMIT_FILE
@@ -230,7 +231,7 @@ sudo bash /opt/birddog/common/device_configure.sh
 ;;
 
 update)
-sudo BIRDDOG_MODE=refresh bash /opt/birddog/common/golden_image_creation.sh
+sudo BIRDDOG_MODE=refresh bash /opt/birddog/common/script_update.sh
 ;;
 
 verify)
