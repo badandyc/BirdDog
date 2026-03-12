@@ -125,7 +125,7 @@ curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/$REMOTE_COMMIT/$1
 
 if [[ ! -f "$2" ]]; then
 echo "NEW $1"
-mv "$TMP" "$2"
+sudo mv -f "$TMP" "$2"
 return
 fi
 
@@ -134,7 +134,7 @@ echo "UNCHANGED $1"
 rm "$TMP"
 else
 echo "UPDATED $1"
-mv "$TMP" "$2"
+sudo mv -f "$TMP" "$2"
 fi
 }
 
