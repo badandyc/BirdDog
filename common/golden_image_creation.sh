@@ -1,3 +1,4 @@
+```bash
 #!/bin/bash
 set -e
 
@@ -33,6 +34,8 @@ echo ""
 BIRDDOG_ROOT=/opt/birddog
 VERSION_DIR=$BIRDDOG_ROOT/version
 COMMIT_FILE=$VERSION_DIR/COMMIT
+VERSION_FILE=$VERSION_DIR/VERSION
+BUILD_FILE=$VERSION_DIR/BUILD
 
 mkdir -p $BIRDDOG_ROOT/{bdm,bdc,mesh,common,mediamtx,web,logs,version}
 
@@ -147,6 +150,8 @@ fetch_file common/oobe_reset.sh $BIRDDOG_ROOT/common/oobe_reset.sh
 fetch_file common/golden_image_creation.sh $BIRDDOG_ROOT/common/golden_image_creation.sh
 
 echo "$REMOTE_COMMIT" > $COMMIT_FILE
+echo "commit-$REMOTE_COMMIT" > $VERSION_FILE
+date -u +"%Y-%m-%dT%H:%M:%SZ" > $BUILD_FILE
 
 # --------------------------------------------------
 # INSTALL LIB
@@ -251,8 +256,14 @@ echo "Services restarted."
 
 status)
 echo ""
-echo "Version:"
+echo "Platform Version:"
 cat /opt/birddog/version/VERSION 2>/dev/null || echo "Unknown"
+echo ""
+echo "Build Time:"
+cat /opt/birddog/version/BUILD 2>/dev/null || echo "Unknown"
+echo ""
+echo "Commit:"
+cat /opt/birddog/version/COMMIT 2>/dev/null || echo "Unknown"
 echo ""
 ;;
 
@@ -270,3 +281,4 @@ chmod +x /usr/local/bin/birddog
 echo "[Phase 7] Finalization"
 echo "Golden install complete."
 echo ""
+```
