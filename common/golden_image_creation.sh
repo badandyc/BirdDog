@@ -110,6 +110,15 @@ LOCAL_COMMIT="none"
 echo "Remote: $REMOTE_COMMIT"
 echo "Local : $LOCAL_COMMIT"
 
+if [[ "$REMOTE_COMMIT" == "$LOCAL_COMMIT" ]]; then
+echo "State : Installer already aligned with platform commit"
+else
+echo "State : Installer newer than node platform state"
+echo "        $LOCAL_COMMIT → $REMOTE_COMMIT"
+fi
+
+echo ""
+
 # --------------------------------------------------
 # FETCH
 # --------------------------------------------------
