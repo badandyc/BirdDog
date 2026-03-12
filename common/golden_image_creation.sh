@@ -100,8 +100,8 @@ echo "[Phase 2] Commit State Check"
 REMOTE_COMMIT=$(git ls-remote https://github.com/badandyc/BirdDog HEAD | cut -c1-7)
 
 if [[ -z "$REMOTE_COMMIT" ]]; then
-echo "ERROR resolving commit"
-exit 1
+    echo "ERROR resolving commit"
+    exit 1
 fi
 
 LOCAL_COMMIT="none"
@@ -111,10 +111,10 @@ echo "Remote: $REMOTE_COMMIT"
 echo "Local : $LOCAL_COMMIT"
 
 if [[ "$REMOTE_COMMIT" == "$LOCAL_COMMIT" ]]; then
-echo "State : Installer already aligned with platform commit"
+    echo "State : Installer already aligned with platform commit"
 else
-echo "State : Installer newer than node platform state"
-echo "        $LOCAL_COMMIT → $REMOTE_COMMIT"
+    echo "State : Installer newer than node platform state"
+    echo "        $LOCAL_COMMIT → $REMOTE_COMMIT"
 fi
 
 echo ""
