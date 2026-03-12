@@ -25,12 +25,8 @@ echo "[Phase 1.5] Installing MediaMTX binary"
 MEDIAMTX_DIR="/opt/birddog/mediamtx"
 MEDIAMTX_TAR="/tmp/mediamtx.tar.gz"
 
-# Fleet default (override in lab with: MEDIAMTX_MODE=latest)
 MEDIAMTX_MODE="${MEDIAMTX_MODE:-pinned}"
-
-# Known good fleet version
 MEDIAMTX_VERSION="v1.16.3"
-
 MEDIAMTX_ARCH="linux_arm64"
 
 mkdir -p "$MEDIAMTX_DIR"
@@ -58,7 +54,7 @@ if [ ! -f "$MEDIAMTX_DIR/mediamtx" ]; then
 
         echo "Using pinned MediaMTX version: $MEDIAMTX_VERSION"
 
-        MEDIAMTX_URL="https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION#v}_${MEDIAMTX_ARCH}.tar.gz"
+        MEDIAMTX_URL="https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_${MEDIAMTX_ARCH}.tar.gz"
 
     fi
 
@@ -90,7 +86,6 @@ if [ ! -f "$MEDIAMTX_DIR/mediamtx" ]; then
 else
     echo "MediaMTX already present — skipping install."
 fi
-
 
 echo "[Phase 2] Commit State Check"
 
