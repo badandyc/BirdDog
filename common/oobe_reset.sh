@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+set -o pipefail
 
 mkdir -p /opt/birddog
 
@@ -11,7 +12,7 @@ echo "BirdDog Factory Reset (OOBE)"
 echo "====================================="
 date
 
-if [ "$EUID" -ne 0 ]; then
+if [[ "$EUID" -ne 0 ]]; then
     echo "Run as root: sudo bash /opt/birddog/common/oobe_reset.sh"
     exit 1
 fi
@@ -29,54 +30,77 @@ if [[ "$CONFIRM" != "RESET" ]]; then
     exit 1
 fi
 
+step() {
+    echo ""
+    echo "=== $1 ==="
+}
 
-echo ""
-echo "=== Stopping BirdDog services ==="
+svc_stop_disable() {
+    SVC="$1"
 
-systemctl stop birddog-mesh.service 2>/dev/null || true
-systemctl stop birddog-stream.service 2>/dev/null || true
-systemctl stop mediamtx.service 2>/dev/null || true
-systemctl stop hostapd 2>/dev/null || true
-systemctl stop dnsmasq 2>/dev/null || true
-systemctl stop nginx 2>/dev/null || true
+    if systemctl list-unit-files | grep -q "^$SVC"; then
+        if systemctl is-active "$SVC" >/dev/null 2>&1; then
+            echo "Stopping $SVC (ACTIVE)"
+            systemctl stop "$SVC"
+        else
+            echo "$SVC already stopped"
+        fi
 
+        if systemctl is-enabled "$SVC" >/dev/null 2>&1; then
+            echo "Disabling $SVC (ENABLED)"
+            systemctl disable "$SVC"
+        else
+            echo "$SVC already disabled"
+        fi
+    else
+        echo "$SVC not present"
+    fi
+}
 
-echo ""
-echo "=== Disabling BirdDog services ==="
+remove_path() {
+    if [[ -e "$1" ]]; then
+        echo "Removing $1"
+        rm -rf "$1"
+    else
+        echo "$1 already clean"
+    fi
+}
 
-systemctl disable birddog-mesh.service 2>/dev/null || true
-systemctl disable birddog-stream.service 2>/dev/null || true
-systemctl disable mediamtx.service 2>/dev/null || true
-systemctl disable hostapd 2>/dev/null || true
-systemctl disable dnsmasq 2>/dev/null || true
+step "Stopping / Disabling BirdDog services"
 
+svc_stop_disable birddog-mesh.service
+svc_stop_disable birddog-stream.service
+svc_stop_disable mediamtx.service
+svc_stop_disable hostapd.service
+svc_stop_disable dnsmasq.service
+svc_stop_disable nginx.service
 
-echo ""
-echo "=== Removing runtime helper scripts ==="
+step "Removing runtime helper scripts"
 
-rm -f /usr/local/bin/birddog-mesh-join.sh
-rm -f /usr/local/bin/birddog-stream.sh
+remove_path /usr/local/bin/birddog-mesh-join.sh
+remove_path /usr/local/bin/birddog-stream.sh
 
+step "Clearing BirdDog runtime state"
 
-echo ""
-echo "=== Clearing BirdDog runtime state ==="
+remove_path /opt/birddog/logs
+remove_path /opt/birddog/mesh
+remove_path /opt/birddog/radio
+remove_path /opt/birddog/web
+remove_path /opt/birddog/bdc/bdc.conf
 
-rm -rf /opt/birddog/logs/*
-rm -rf /opt/birddog/mesh/*
-rm -rf /opt/birddog/radio/*
-rm -rf /opt/birddog/web/*
-rm -f /opt/birddog/bdc/bdc.conf
+mkdir -p /opt/birddog/logs
+mkdir -p /opt/birddog/mesh
+mkdir -p /opt/birddog/radio
+mkdir -p /opt/birddog/web
 
+step "Resetting hostname"
 
-echo ""
-echo "=== Resetting hostname ==="
-
+OLD_HOST=$(hostname)
 hostnamectl set-hostname birddog
 hostname birddog
+echo "Hostname: $OLD_HOST → $(hostname)"
 
-
-echo ""
-echo "=== Resetting hosts table ==="
+step "Resetting hosts table"
 
 cat <<EOF > /etc/hosts
 127.0.0.1 localhost
@@ -87,38 +111,51 @@ ff02::1 ip6-allnodes
 ff02::2 ip6-allrouters
 EOF
 
+echo "/etc/hosts rewritten"
 
-echo ""
-echo "=== Removing network configs ==="
+step "Removing network configs"
 
-rm -f /etc/systemd/network/*.network
-rm -f /etc/dnsmasq.conf
-rm -rf /etc/hostapd/*
-rm -rf /etc/systemd/system/hostapd.service.d/*
+remove_path /etc/systemd/network
+remove_path /etc/dnsmasq.conf
+remove_path /etc/hostapd
+remove_path /etc/systemd/system/hostapd.service.d
 
-
-echo ""
-echo "=== Reloading systemd ==="
+step "Reloading systemd"
 
 systemctl daemon-reload
+echo "systemd daemon-reload complete"
 
+step "Normalizing radio interface modes"
+
+for IFACE in wlan0 wlan1 wlan2; do
+    if ip link show "$IFACE" >/dev/null 2>&1; then
+        echo "Normalizing $IFACE"
+        ip link set "$IFACE" down || true
+        iw dev "$IFACE" set type managed || true
+    else
+        echo "$IFACE not present"
+    fi
+done
 
 echo ""
-echo "=== Normalizing radio interface modes ==="
+echo "Current radio state:"
+iw dev || true
 
-ip link set wlan1 down 2>/dev/null || true
-ip link set wlan2 down 2>/dev/null || true
+step "Restarting Avahi clean"
 
-iw dev wlan1 set type managed 2>/dev/null || true
-iw dev wlan2 set type managed 2>/dev/null || true
+remove_path /var/lib/avahi-daemon
+systemctl restart avahi-daemon
+echo "Avahi restarted"
 
+step "Final verification snapshot"
 
+echo "Hostname: $(hostname)"
 echo ""
-echo "=== Restarting Avahi clean ==="
-
-rm -rf /var/lib/avahi-daemon/* 2>/dev/null || true
-systemctl restart avahi-daemon 2>/dev/null || true
-
+echo "BirdDog directory layout:"
+ls -R /opt/birddog | head -50
+echo ""
+echo "Enabled BirdDog-related services:"
+systemctl list-unit-files | grep -E "birddog|mediamtx|hostapd|dnsmasq" || true
 
 echo ""
 echo "====================================="
