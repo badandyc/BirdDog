@@ -9,8 +9,8 @@ COMMIT_FILE=$VERSION_DIR/COMMIT
 
 mkdir -p $BIRDDOG_ROOT/{bdm,bdc,mesh,common,mediamtx,web,logs,version}
 
-echo "[Phase 0] Updating package index"
-sudo apt update
+echo "[Phase 0] Updating package index (best effort)"
+sudo apt update || echo "apt update failed — continuing"
 
 echo "[Phase 1] Package Assurance"
 
@@ -25,17 +25,7 @@ echo "[Phase 1.5] Installing MediaMTX binary"
 MEDIAMTX_DIR="/opt/birddog/mediamtx"
 MEDIAMTX_TAR="/tmp/mediamtx.tar.gz"
 
-# --------------------------------------------------
-# Mode selection
-# --------------------------------------------------
-# Default = pinned (fleet safe)
-# Override in lab:
-#   sudo MEDIAMTX_MODE=latest ./golden_image_creation.sh
-# --------------------------------------------------
-
 MEDIAMTX_MODE="${MEDIAMTX_MODE:-pinned}"
-
-# Known-good fleet version (UPDATE THIS ONLY AFTER VALIDATION)
 MEDIAMTX_VERSION="v1.8.4"
 
 mkdir -p "$MEDIAMTX_DIR"
@@ -83,10 +73,10 @@ if [ ! -f "$MEDIAMTX_DIR/mediamtx" ]; then
 
     echo "Extracting MediaMTX..."
 
+    rm -rf "$MEDIAMTX_DIR"/*
     tar -xzf "$MEDIAMTX_TAR" -C "$MEDIAMTX_DIR" --strip-components=1
 
     chmod +x "$MEDIAMTX_DIR/mediamtx"
-
     rm -f "$MEDIAMTX_TAR"
 
     echo "MediaMTX installed successfully."
@@ -95,9 +85,16 @@ else
     echo "MediaMTX already present — skipping install."
 fi
 
+
 echo "[Phase 2] Commit State Check"
 
 REMOTE_COMMIT=$(git ls-remote https://github.com/badandyc/BirdDog HEAD | cut -c1-7)
+
+if [[ -z "$REMOTE_COMMIT" ]]; then
+    echo "ERROR: Could not resolve remote commit"
+    exit 1
+fi
+
 LOCAL_COMMIT="none"
 [[ -f $COMMIT_FILE ]] && LOCAL_COMMIT=$(cat $COMMIT_FILE)
 
@@ -115,6 +112,7 @@ echo "TO   commit: $NEW_COMMIT"
 echo "-------------------------------------"
 echo ""
 
+
 echo "[Phase 3] Script Fetch + Diff Report"
 
 fetch_file() {
@@ -124,7 +122,10 @@ LOCAL_PATH="$2"
 
 TMP_FILE="/tmp/birddog_fetch.$$"
 
-curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/$REMOTE_COMMIT/$REMOTE_PATH" -o "$TMP_FILE"
+curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/$REMOTE_COMMIT/$REMOTE_PATH" -o "$TMP_FILE" || {
+    echo "ERROR: failed downloading $REMOTE_PATH"
+    exit 1
+}
 
 if [[ ! -f "$LOCAL_PATH" ]]; then
 echo "NEW       $REMOTE_PATH"
@@ -160,6 +161,7 @@ fetch_file common/oobe_reset.sh $BIRDDOG_ROOT/common/oobe_reset.sh
 
 echo "$REMOTE_COMMIT" > $COMMIT_FILE
 
+
 echo "[Phase 4] Install Library"
 
 cat << 'EOF' > $BIRDDOG_ROOT/common/install_lib.sh
@@ -173,7 +175,7 @@ mkdir -p "$LOG_DIR" "$VERSION_DIR"
 
 start_install_log() {
 TYPE="$1"
-LOGFILE="$LOG_DIR/${TYPE}*$(date +%Y%m%d*%H%M%S).log"
+LOGFILE="$LOG_DIR/${TYPE}_$(date +%Y%m%d_%H%M%S).log"
 exec > >(tee -a "$LOGFILE") 2>&1
 echo "BirdDog Install Session: $TYPE"
 echo "Time: $(date)"
@@ -203,6 +205,7 @@ chmod +x $BIRDDOG_ROOT/common/install_lib.sh
 source $BIRDDOG_ROOT/common/install_lib.sh
 start_install_log golden
 
+
 echo "[Phase 5] Permission Enforcement"
 
 chmod +x $BIRDDOG_ROOT/common/*.sh
@@ -210,9 +213,11 @@ chmod +x $BIRDDOG_ROOT/bdm/*.sh
 chmod +x $BIRDDOG_ROOT/bdc/*.sh
 chmod +x $BIRDDOG_ROOT/mesh/*.sh
 
+
 echo "[Phase 6] Installing / Refreshing BirdDog CLI"
 
-# (CLI section unchanged from your current working version)
+# (Your current working CLI block goes here unchanged)
+
 
 echo "[Phase 7] Finalization"
 
