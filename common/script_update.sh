@@ -1,4 +1,3 @@
-```bash
 #!/bin/bash
 set -e
 
@@ -115,4 +114,3 @@ fi
 echo ""
 echo "BirdDog script update complete."
 echo ""
-```
