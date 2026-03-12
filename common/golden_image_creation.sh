@@ -1,34 +1,55 @@
 #!/bin/bash
 set -e
 
-echo "=== BirdDog Golden Image Creation ==="
+echo "====================================="
+echo "BirdDog Golden Image Creation"
+echo "====================================="
+echo ""
+
+# --------------------------------------------------
+# INSTALL MODE SELECTION
+# --------------------------------------------------
+
+BIRDDOG_MODE="${BIRDDOG_MODE:-}"
+
+if [[ -z "$BIRDDOG_MODE" ]]; then
+
+    echo "Select install mode:"
+    echo ""
+    echo "[F] Full install   → packages + MediaMTX + scripts"
+    echo "[R] Refresh        → scripts only (fast field update)"
+    echo ""
+
+    read -p "Enter choice [F/R]: " MODE
+
+    case "$MODE" in
+        F|f) BIRDDOG_MODE="full" ;;
+        R|r) BIRDDOG_MODE="refresh" ;;
+        *) echo "Invalid selection"; exit 1 ;;
+    esac
+fi
+
+echo ""
+echo "Installer mode: $BIRDDOG_MODE"
+echo ""
+
+# --------------------------------------------------
 
 BIRDDOG_ROOT=/opt/birddog
 VERSION_DIR=$BIRDDOG_ROOT/version
 COMMIT_FILE=$VERSION_DIR/COMMIT
 
-BIRDDOG_MODE="${BIRDDOG_MODE:-full}"
-
-echo "BirdDog mode: $BIRDDOG_MODE"
-
 mkdir -p $BIRDDOG_ROOT/{bdm,bdc,mesh,common,mediamtx,web,logs,version}
 
 # --------------------------------------------------
-# Phase 0 — Package Index
+# FULL MODE ONLY
 # --------------------------------------------------
 
 if [[ "$BIRDDOG_MODE" == "full" ]]; then
+
     echo "[Phase 0] Updating package index (best effort)"
     sudo apt update || echo "apt update failed — continuing"
-else
-    echo "[Phase 0] Skipped (update mode)"
-fi
 
-# --------------------------------------------------
-# Phase 1 — Package Assurance
-# --------------------------------------------------
-
-if [[ "$BIRDDOG_MODE" == "full" ]]; then
     echo "[Phase 1] Package Assurance"
 
     for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar; do
@@ -36,96 +57,68 @@ if [[ "$BIRDDOG_MODE" == "full" ]]; then
     done
 
     echo "Packages ready."
-else
-    echo "[Phase 1] Skipped (update mode)"
-fi
 
-# --------------------------------------------------
-# Phase 1.5 — MediaMTX Install
-# --------------------------------------------------
+    echo "[Phase 1.5] Installing MediaMTX binary"
 
-echo "[Phase 1.5] MediaMTX install logic"
+    MEDIAMTX_DIR="/opt/birddog/mediamtx"
+    MEDIAMTX_TAR="/tmp/mediamtx.tar.gz"
+    MEDIAMTX_STAGE="/tmp/mediamtx_stage"
 
-MEDIAMTX_DIR="/opt/birddog/mediamtx"
-MEDIAMTX_TAR="/tmp/mediamtx.tar.gz"
-MEDIAMTX_STAGE="/tmp/mediamtx_stage"
+    MEDIAMTX_MODE="${MEDIAMTX_MODE:-pinned}"
+    MEDIAMTX_VERSION="v1.16.3"
 
-MEDIAMTX_MODE="${MEDIAMTX_MODE:-pinned}"
-MEDIAMTX_VERSION="v1.16.3"
+    mkdir -p "$MEDIAMTX_DIR"
 
-INSTALL_MEDIAMTX=0
+    if [ ! -f "$MEDIAMTX_DIR/mediamtx" ]; then
 
-if [[ "$BIRDDOG_MODE" == "full" ]]; then
-    INSTALL_MEDIAMTX=1
-else
-    if [[ ! -f "$MEDIAMTX_DIR/mediamtx" ]]; then
-        INSTALL_MEDIAMTX=1
-    fi
-fi
+        if [[ "$MEDIAMTX_MODE" == "latest" ]]; then
 
-mkdir -p "$MEDIAMTX_DIR"
+            MEDIAMTX_URL=$(curl -fsSL https://api.github.com/repos/bluenviron/mediamtx/releases/latest \
+                | grep browser_download_url \
+                | grep linux_arm64.tar.gz \
+                | cut -d '"' -f 4)
 
-if [[ "$INSTALL_MEDIAMTX" == "1" ]]; then
+        else
 
-    echo "Installing MediaMTX (mode: $MEDIAMTX_MODE)"
+            MEDIAMTX_URL="https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_arm64.tar.gz"
 
-    if [[ "$MEDIAMTX_MODE" == "latest" ]]; then
+        fi
 
-        MEDIAMTX_URL=$(curl -fsSL https://api.github.com/repos/bluenviron/mediamtx/releases/latest \
-            | grep browser_download_url \
-            | grep linux_arm64.tar.gz \
-            | cut -d '"' -f 4)
+        echo "Downloading:"
+        echo "$MEDIAMTX_URL"
 
-        if [[ -z "$MEDIAMTX_URL" ]]; then
-            echo "ERROR: Could not resolve latest MediaMTX URL"
+        curl -fL "$MEDIAMTX_URL" -o "$MEDIAMTX_TAR"
+
+        echo "Extracting to staging..."
+        rm -rf "$MEDIAMTX_STAGE"
+        mkdir -p "$MEDIAMTX_STAGE"
+
+        tar -xzf "$MEDIAMTX_TAR" -C "$MEDIAMTX_STAGE"
+
+        BIN_PATH=$(find "$MEDIAMTX_STAGE" -type f -name mediamtx | head -1)
+
+        if [[ -z "$BIN_PATH" ]]; then
+            echo "ERROR: MediaMTX binary not found"
             exit 1
         fi
 
+        rm -rf "$MEDIAMTX_DIR"/*
+        mv "$BIN_PATH" "$MEDIAMTX_DIR/mediamtx"
+        chmod +x "$MEDIAMTX_DIR/mediamtx"
+
+        rm -rf "$MEDIAMTX_STAGE"
+        rm -f "$MEDIAMTX_TAR"
+
+        echo "MediaMTX installed."
+
     else
-
-        MEDIAMTX_URL="https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_arm64.tar.gz"
-
+        echo "MediaMTX already present — skipping."
     fi
 
-    echo "Downloading:"
-    echo "$MEDIAMTX_URL"
-
-    curl -fL "$MEDIAMTX_URL" -o "$MEDIAMTX_TAR"
-
-    if ! file "$MEDIAMTX_TAR" | grep -q gzip; then
-        echo "ERROR: MediaMTX archive invalid"
-        exit 1
-    fi
-
-    echo "Extracting to staging..."
-    rm -rf "$MEDIAMTX_STAGE"
-    mkdir -p "$MEDIAMTX_STAGE"
-
-    tar -xzf "$MEDIAMTX_TAR" -C "$MEDIAMTX_STAGE"
-
-    BIN_PATH=$(find "$MEDIAMTX_STAGE" -type f -name mediamtx | head -1)
-
-    if [[ -z "$BIN_PATH" ]]; then
-        echo "ERROR: MediaMTX binary not found after extraction"
-        exit 1
-    fi
-
-    echo "Installing MediaMTX binary..."
-    rm -rf "$MEDIAMTX_DIR"/*
-    mv "$BIN_PATH" "$MEDIAMTX_DIR/mediamtx"
-    chmod +x "$MEDIAMTX_DIR/mediamtx"
-
-    rm -rf "$MEDIAMTX_STAGE"
-    rm -f "$MEDIAMTX_TAR"
-
-    echo "MediaMTX installed successfully."
-
-else
-    echo "MediaMTX already present — skipping."
 fi
 
 # --------------------------------------------------
-# Phase 2 — Commit State
+# COMMIT CHECK
 # --------------------------------------------------
 
 echo "[Phase 2] Commit State Check"
@@ -140,22 +133,11 @@ fi
 LOCAL_COMMIT="none"
 [[ -f $COMMIT_FILE ]] && LOCAL_COMMIT=$(cat $COMMIT_FILE)
 
-PREVIOUS_COMMIT=$LOCAL_COMMIT
-NEW_COMMIT=$REMOTE_COMMIT
-
 echo "Remote commit: $REMOTE_COMMIT"
 echo "Local commit : $LOCAL_COMMIT"
 
-echo ""
-echo "-------------------------------------"
-echo "BirdDog Update Transaction"
-echo "FROM commit: $PREVIOUS_COMMIT"
-echo "TO   commit: $NEW_COMMIT"
-echo "-------------------------------------"
-echo ""
-
 # --------------------------------------------------
-# Phase 3 — Script Fetch
+# SCRIPT FETCH
 # --------------------------------------------------
 
 echo "[Phase 3] Script Fetch + Diff Report"
@@ -168,7 +150,7 @@ LOCAL_PATH="$2"
 TMP_FILE="/tmp/birddog_fetch.$$"
 
 curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/$REMOTE_COMMIT/$REMOTE_PATH" -o "$TMP_FILE" || {
-    echo "ERROR: failed downloading $REMOTE_PATH"
+    echo "ERROR downloading $REMOTE_PATH"
     exit 1
 }
 
@@ -204,14 +186,13 @@ fetch_file common/golden_image_creation.sh $BIRDDOG_ROOT/common/golden_image_cre
 echo "$REMOTE_COMMIT" > $COMMIT_FILE
 
 # --------------------------------------------------
-# Phase 4 — Install Library
+# INSTALL LIB
 # --------------------------------------------------
 
 echo "[Phase 4] Install Library"
 
 cat << 'EOF' > $BIRDDOG_ROOT/common/install_lib.sh
 #!/bin/bash
-
 BIRDDOG_ROOT="/opt/birddog"
 LOG_DIR="$BIRDDOG_ROOT/logs"
 VERSION_DIR="$BIRDDOG_ROOT/version"
@@ -222,15 +203,11 @@ start_install_log() {
 TYPE="$1"
 LOGFILE="$LOG_DIR/${TYPE}_$(date +%Y%m%d_%H%M%S).log"
 exec > >(tee -a "$LOGFILE") 2>&1
-echo "BirdDog Install Session: $TYPE"
-echo "Time: $(date)"
 }
 
 write_version_file() {
 TYPE="$1"
-VERSION_FILE="$VERSION_DIR/VERSION"
-
-cat <<EOV > "$VERSION_FILE"
+cat <<EOV > "$VERSION_DIR/VERSION"
 INSTALL_TIME=$(date -Iseconds)
 INSTALL_TYPE=$TYPE
 COMMIT=$(cat $VERSION_DIR/COMMIT)
@@ -246,12 +223,11 @@ done > "$VERSION_DIR/MANIFEST"
 EOF
 
 chmod +x $BIRDDOG_ROOT/common/install_lib.sh
-
 source $BIRDDOG_ROOT/common/install_lib.sh
 start_install_log golden
 
 # --------------------------------------------------
-# Phase 5 — Permissions
+# PERMISSIONS
 # --------------------------------------------------
 
 echo "[Phase 5] Permission Enforcement"
@@ -262,15 +238,15 @@ chmod +x $BIRDDOG_ROOT/bdc/*.sh
 chmod +x $BIRDDOG_ROOT/mesh/*.sh
 
 # --------------------------------------------------
-# Phase 6 — CLI Refresh
+# CLI INSTALL
 # --------------------------------------------------
 
 echo "[Phase 6] Installing / Refreshing BirdDog CLI"
 
-# <<< YOU KEEP YOUR CURRENT WORKING CLI BLOCK HERE >>>
+# <<< KEEP YOUR CURRENT WORKING CLI BLOCK HERE >>>
 
 # --------------------------------------------------
-# Phase 7 — Finalization
+# FINAL
 # --------------------------------------------------
 
 echo "[Phase 7] Finalization"
@@ -279,15 +255,6 @@ write_version_file golden
 generate_manifest
 
 echo ""
-echo "BirdDog Commit State:"
-echo "Previous: $PREVIOUS_COMMIT"
-echo "Current : $(cat $COMMIT_FILE)"
-echo ""
-
-echo ""
-echo "====================================="
-echo "BirdDog Golden Image Setup Complete"
-echo "====================================="
-echo ""
+echo "BirdDog install complete."
 echo "Next step: birddog configure"
 echo ""
