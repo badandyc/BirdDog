@@ -33,6 +33,16 @@ LOCAL_COMMIT="none"
 
 echo "Remote: $REMOTE_COMMIT"
 echo "Local : $LOCAL_COMMIT"
+
+if [[ "$REMOTE_COMMIT" == "$LOCAL_COMMIT" ]]; then
+echo "State : Already at latest platform commit"
+COMMIT_ADVANCE=0
+else
+echo "State : Advancing platform commit"
+echo "        $LOCAL_COMMIT → $REMOTE_COMMIT"
+COMMIT_ADVANCE=1
+fi
+
 echo ""
 
 # --------------------------------------------------
