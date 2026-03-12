@@ -147,7 +147,7 @@ fetch_file mesh/add_mesh_network.sh $BIRDDOG_ROOT/mesh/add_mesh_network.sh
 fetch_file common/device_configure.sh $BIRDDOG_ROOT/common/device_configure.sh
 fetch_file common/radio_map_setup.sh $BIRDDOG_ROOT/common/radio_map_setup.sh
 fetch_file common/oobe_reset.sh $BIRDDOG_ROOT/common/oobe_reset.sh
-fetch_file common/oobe_reset.sh $BIRDDOG_ROOT/common/script_update.sh
+fetch_file common/script_update.sh $BIRDDOG_ROOT/common/script_update.sh
 
 echo "$REMOTE_COMMIT" > $COMMIT_FILE
 echo "commit-$REMOTE_COMMIT" > $VERSION_FILE
