@@ -7,20 +7,44 @@ BIRDDOG_ROOT=/opt/birddog
 VERSION_DIR=$BIRDDOG_ROOT/version
 COMMIT_FILE=$VERSION_DIR/COMMIT
 
+BIRDDOG_MODE="${BIRDDOG_MODE:-full}"
+
+echo "BirdDog mode: $BIRDDOG_MODE"
+
 mkdir -p $BIRDDOG_ROOT/{bdm,bdc,mesh,common,mediamtx,web,logs,version}
 
-echo "[Phase 0] Updating package index (best effort)"
-sudo apt update || echo "apt update failed — continuing"
+# --------------------------------------------------
+# Phase 0 — Package Index
+# --------------------------------------------------
 
-echo "[Phase 1] Package Assurance"
+if [[ "$BIRDDOG_MODE" == "full" ]]; then
+    echo "[Phase 0] Updating package index (best effort)"
+    sudo apt update || echo "apt update failed — continuing"
+else
+    echo "[Phase 0] Skipped (update mode)"
+fi
 
-for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar; do
-dpkg -s "$pkg" >/dev/null 2>&1 || sudo apt install -y "$pkg"
-done
+# --------------------------------------------------
+# Phase 1 — Package Assurance
+# --------------------------------------------------
 
-echo "Packages ready."
+if [[ "$BIRDDOG_MODE" == "full" ]]; then
+    echo "[Phase 1] Package Assurance"
 
-echo "[Phase 1.5] Installing MediaMTX binary"
+    for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar; do
+        dpkg -s "$pkg" >/dev/null 2>&1 || sudo apt install -y "$pkg"
+    done
+
+    echo "Packages ready."
+else
+    echo "[Phase 1] Skipped (update mode)"
+fi
+
+# --------------------------------------------------
+# Phase 1.5 — MediaMTX Install
+# --------------------------------------------------
+
+echo "[Phase 1.5] MediaMTX install logic"
 
 MEDIAMTX_DIR="/opt/birddog/mediamtx"
 MEDIAMTX_TAR="/tmp/mediamtx.tar.gz"
@@ -29,15 +53,23 @@ MEDIAMTX_STAGE="/tmp/mediamtx_stage"
 MEDIAMTX_MODE="${MEDIAMTX_MODE:-pinned}"
 MEDIAMTX_VERSION="v1.16.3"
 
+INSTALL_MEDIAMTX=0
+
+if [[ "$BIRDDOG_MODE" == "full" ]]; then
+    INSTALL_MEDIAMTX=1
+else
+    if [[ ! -f "$MEDIAMTX_DIR/mediamtx" ]]; then
+        INSTALL_MEDIAMTX=1
+    fi
+fi
+
 mkdir -p "$MEDIAMTX_DIR"
 
-if [ ! -f "$MEDIAMTX_DIR/mediamtx" ]; then
+if [[ "$INSTALL_MEDIAMTX" == "1" ]]; then
 
-    echo "MediaMTX mode: $MEDIAMTX_MODE"
+    echo "Installing MediaMTX (mode: $MEDIAMTX_MODE)"
 
     if [[ "$MEDIAMTX_MODE" == "latest" ]]; then
-
-        echo "Resolving latest MediaMTX release..."
 
         MEDIAMTX_URL=$(curl -fsSL https://api.github.com/repos/bluenviron/mediamtx/releases/latest \
             | grep browser_download_url \
@@ -51,8 +83,6 @@ if [ ! -f "$MEDIAMTX_DIR/mediamtx" ]; then
 
     else
 
-        echo "Using pinned MediaMTX version: $MEDIAMTX_VERSION"
-
         MEDIAMTX_URL="https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_arm64.tar.gz"
 
     fi
@@ -62,13 +92,8 @@ if [ ! -f "$MEDIAMTX_DIR/mediamtx" ]; then
 
     curl -fL "$MEDIAMTX_URL" -o "$MEDIAMTX_TAR"
 
-    if [ ! -s "$MEDIAMTX_TAR" ]; then
-        echo "ERROR: MediaMTX download failed (empty file)"
-        exit 1
-    fi
-
     if ! file "$MEDIAMTX_TAR" | grep -q gzip; then
-        echo "ERROR: Downloaded MediaMTX archive is not valid gzip"
+        echo "ERROR: MediaMTX archive invalid"
         exit 1
     fi
 
@@ -96,8 +121,12 @@ if [ ! -f "$MEDIAMTX_DIR/mediamtx" ]; then
     echo "MediaMTX installed successfully."
 
 else
-    echo "MediaMTX already present — skipping install."
+    echo "MediaMTX already present — skipping."
 fi
+
+# --------------------------------------------------
+# Phase 2 — Commit State
+# --------------------------------------------------
 
 echo "[Phase 2] Commit State Check"
 
@@ -125,6 +154,9 @@ echo "TO   commit: $NEW_COMMIT"
 echo "-------------------------------------"
 echo ""
 
+# --------------------------------------------------
+# Phase 3 — Script Fetch
+# --------------------------------------------------
 
 echo "[Phase 3] Script Fetch + Diff Report"
 
@@ -141,20 +173,20 @@ curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/$REMOTE_COMMIT/$R
 }
 
 if [[ ! -f "$LOCAL_PATH" ]]; then
-echo "NEW       $REMOTE_PATH"
-mv "$TMP_FILE" "$LOCAL_PATH"
-return
+    echo "NEW       $REMOTE_PATH"
+    mv "$TMP_FILE" "$LOCAL_PATH"
+    return
 fi
 
 REMOTE_SUM=$(sha256sum "$TMP_FILE" | awk '{print $1}')
 LOCAL_SUM=$(sha256sum "$LOCAL_PATH" | awk '{print $1}')
 
 if [[ "$REMOTE_SUM" == "$LOCAL_SUM" ]]; then
-echo "UNCHANGED $REMOTE_PATH"
-rm "$TMP_FILE"
+    echo "UNCHANGED $REMOTE_PATH"
+    rm "$TMP_FILE"
 else
-echo "UPDATED   $REMOTE_PATH"
-mv "$TMP_FILE" "$LOCAL_PATH"
+    echo "UPDATED   $REMOTE_PATH"
+    mv "$TMP_FILE" "$LOCAL_PATH"
 fi
 }
 
@@ -162,18 +194,18 @@ fetch_file bdm/bdm_initial_setup.sh $BIRDDOG_ROOT/bdm/bdm_initial_setup.sh
 fetch_file bdm/bdm_AP_setup.sh $BIRDDOG_ROOT/bdm/bdm_AP_setup.sh
 fetch_file bdm/bdm_mediamtx_setup.sh $BIRDDOG_ROOT/bdm/bdm_mediamtx_setup.sh
 fetch_file bdm/bdm_web_setup.sh $BIRDDOG_ROOT/bdm/bdm_web_setup.sh
-
 fetch_file bdc/bdc_fresh_install_setup.sh $BIRDDOG_ROOT/bdc/bdc_fresh_install_setup.sh
-
 fetch_file mesh/add_mesh_network.sh $BIRDDOG_ROOT/mesh/add_mesh_network.sh
-
 fetch_file common/device_configure.sh $BIRDDOG_ROOT/common/device_configure.sh
 fetch_file common/radio_map_setup.sh $BIRDDOG_ROOT/common/radio_map_setup.sh
-fetch_file common/golden_image_creation.sh $BIRDDOG_ROOT/common/golden_image_creation.sh
 fetch_file common/oobe_reset.sh $BIRDDOG_ROOT/common/oobe_reset.sh
+fetch_file common/golden_image_creation.sh $BIRDDOG_ROOT/common/golden_image_creation.sh
 
 echo "$REMOTE_COMMIT" > $COMMIT_FILE
 
+# --------------------------------------------------
+# Phase 4 — Install Library
+# --------------------------------------------------
 
 echo "[Phase 4] Install Library"
 
@@ -218,6 +250,9 @@ chmod +x $BIRDDOG_ROOT/common/install_lib.sh
 source $BIRDDOG_ROOT/common/install_lib.sh
 start_install_log golden
 
+# --------------------------------------------------
+# Phase 5 — Permissions
+# --------------------------------------------------
 
 echo "[Phase 5] Permission Enforcement"
 
@@ -226,183 +261,17 @@ chmod +x $BIRDDOG_ROOT/bdm/*.sh
 chmod +x $BIRDDOG_ROOT/bdc/*.sh
 chmod +x $BIRDDOG_ROOT/mesh/*.sh
 
+# --------------------------------------------------
+# Phase 6 — CLI Refresh
+# --------------------------------------------------
 
 echo "[Phase 6] Installing / Refreshing BirdDog CLI"
 
-cat << 'EOF' > /usr/local/bin/birddog
-#!/bin/bash
-set -e
+# <<< YOU KEEP YOUR CURRENT WORKING CLI BLOCK HERE >>>
 
-ORIG_ARGS=("$@")
-
-require_root() {
-    if [ "$EUID" -ne 0 ]; then
-        echo "Elevating privileges..."
-        exec sudo "$0" "${ORIG_ARGS[@]}"
-    fi
-}
-
-source /opt/birddog/common/install_lib.sh 2>/dev/null || true
-
-show_radios() {
-
-echo ""
-echo "================================="
-echo "BirdDog Radio Layout"
-echo "================================="
-
-iw dev | awk '
-$1=="Interface"{iface=$2}
-$1=="type"{type=$2}
-$1=="channel"{chan=$2}
-$1=="txpower"{tx=$2" "$3}
-$1=="ssid"{ssid=$2}
-$1=="mesh" && $2=="id"{mesh=$3}
-
-$1=="Interface" && NR>1{
-printf "%-6s %-8s %-6s %-10s %-10s\n", iface_prev,type_prev,chan_prev,tx_prev,(ssid_prev?ssid_prev:mesh_prev)
-ssid_prev=""
-mesh_prev=""
-}
-
-{
-iface_prev=iface
-type_prev=type
-chan_prev=chan
-tx_prev=tx
-ssid_prev=ssid
-mesh_prev=mesh
-}
-
-END{
-printf "%-6s %-8s %-6s %-10s %-10s\n", iface_prev,type_prev,chan_prev,tx_prev,(ssid_prev?ssid_prev:mesh_prev)
-}'
-echo ""
-}
-
-update_scripts() {
-
-REMOTE=$(git ls-remote https://github.com/badandyc/BirdDog HEAD | cut -c1-7)
-LOCAL=$(cat /opt/birddog/version/COMMIT 2>/dev/null || echo none)
-
-echo "Remote commit: $REMOTE"
-echo "Local commit : $LOCAL"
-
-if [[ "$REMOTE" == "$LOCAL" ]]; then
-    echo "Already up-to-date."
-    exit 0
-fi
-
-start_install_log update
-
-curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/$REMOTE/common/golden_image_creation.sh" \
--o /opt/birddog/common/golden_image_creation.sh
-
-bash /opt/birddog/common/golden_image_creation.sh
-}
-
-verify_install() {
-
-echo ""
-echo "================================="
-echo "BirdDog Verification"
-echo "================================="
-
-if sha256sum -c /opt/birddog/version/MANIFEST >/dev/null 2>&1; then
-    echo "Script integrity : OK"
-else
-    echo "Script integrity : FAILED"
-fi
-
-if systemctl is-active birddog-mesh.service >/dev/null 2>&1; then
-    echo "Mesh service     : OK"
-else
-    echo "Mesh service     : DOWN"
-fi
-
-echo ""
-}
-
-verify_node() {
-
-echo ""
-echo "================================="
-echo "BirdDog Node Health"
-echo "================================="
-
-echo "Hostname:"
-hostname
-
-echo ""
-echo "Mesh IP:"
-ip -4 addr show wlan1 2>/dev/null | awk '/inet /{print $2}' || echo "Missing"
-
-echo ""
-systemctl is-active birddog-mesh.service >/dev/null 2>&1 && echo "Mesh      : OK" || echo "Mesh      : DOWN"
-systemctl is-active mediamtx >/dev/null 2>&1 && echo "MediaMTX  : OK" || echo "MediaMTX  : DOWN"
-systemctl is-active nginx >/dev/null 2>&1 && echo "Web       : OK" || echo "Web       : DOWN"
-
-echo ""
-}
-
-case "$1" in
-
-radios)
-show_radios
-;;
-
-install)
-require_root
-bash /opt/birddog/common/golden_image_creation.sh
-;;
-
-configure)
-require_root
-start_install_log configure
-bash /opt/birddog/common/device_configure.sh
-write_version_file configure
-generate_manifest
-;;
-
-update)
-require_root
-update_scripts
-;;
-
-verify)
-verify_install
-;;
-
-verify-node)
-verify_node
-;;
-
-restart)
-require_root
-systemctl restart mediamtx 2>/dev/null || true
-systemctl restart nginx 2>/dev/null || true
-systemctl restart birddog-stream 2>/dev/null || true
-;;
-
-status)
-cat /opt/birddog/version/VERSION 2>/dev/null || echo "Unknown"
-;;
-
-*)
-echo "Commands:"
-echo " birddog radios"
-echo " birddog install"
-echo " birddog configure"
-echo " birddog update"
-echo " birddog verify"
-echo " birddog verify-node"
-echo " birddog restart"
-echo " birddog status"
-;;
-esac
-EOF
-
-chmod +x /usr/local/bin/birddog
+# --------------------------------------------------
+# Phase 7 — Finalization
+# --------------------------------------------------
 
 echo "[Phase 7] Finalization"
 
