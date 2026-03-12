@@ -24,17 +24,16 @@ echo "[Phase 1.5] Installing MediaMTX binary"
 
 MEDIAMTX_DIR="/opt/birddog/mediamtx"
 MEDIAMTX_TAR="/tmp/mediamtx.tar.gz"
+MEDIAMTX_STAGE="/tmp/mediamtx_stage"
 
 MEDIAMTX_MODE="${MEDIAMTX_MODE:-pinned}"
 MEDIAMTX_VERSION="v1.16.3"
-MEDIAMTX_ARCH="linux_arm64"
 
 mkdir -p "$MEDIAMTX_DIR"
 
 if [ ! -f "$MEDIAMTX_DIR/mediamtx" ]; then
 
     echo "MediaMTX mode: $MEDIAMTX_MODE"
-    echo "Architecture : $MEDIAMTX_ARCH"
 
     if [[ "$MEDIAMTX_MODE" == "latest" ]]; then
 
@@ -42,7 +41,7 @@ if [ ! -f "$MEDIAMTX_DIR/mediamtx" ]; then
 
         MEDIAMTX_URL=$(curl -fsSL https://api.github.com/repos/bluenviron/mediamtx/releases/latest \
             | grep browser_download_url \
-            | grep "${MEDIAMTX_ARCH}.tar.gz" \
+            | grep linux_arm64.tar.gz \
             | cut -d '"' -f 4)
 
         if [[ -z "$MEDIAMTX_URL" ]]; then
@@ -54,7 +53,7 @@ if [ ! -f "$MEDIAMTX_DIR/mediamtx" ]; then
 
         echo "Using pinned MediaMTX version: $MEDIAMTX_VERSION"
 
-        MEDIAMTX_URL="https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_${MEDIAMTX_ARCH}.tar.gz"
+        MEDIAMTX_URL="https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_arm64.tar.gz"
 
     fi
 
@@ -73,35 +72,28 @@ if [ ! -f "$MEDIAMTX_DIR/mediamtx" ]; then
         exit 1
     fi
 
-    echo "Extracting MediaMTX..."
+    echo "Extracting to staging..."
+    rm -rf "$MEDIAMTX_STAGE"
+    mkdir -p "$MEDIAMTX_STAGE"
 
-STAGE_DIR="/tmp/mediamtx_stage"
-rm -rf "$STAGE_DIR"
-mkdir -p "$STAGE_DIR"
+    tar -xzf "$MEDIAMTX_TAR" -C "$MEDIAMTX_STAGE"
 
-tar -xzf "$MEDIAMTX_TAR" -C "$STAGE_DIR"
+    BIN_PATH=$(find "$MEDIAMTX_STAGE" -type f -name mediamtx | head -1)
 
-MEDIAMTX_BIN=$(find "$STAGE_DIR" -type f -name mediamtx | head -1)
+    if [[ -z "$BIN_PATH" ]]; then
+        echo "ERROR: MediaMTX binary not found after extraction"
+        exit 1
+    fi
 
-if [[ -z "$MEDIAMTX_BIN" ]]; then
-    echo "ERROR: mediamtx binary not found after extraction"
-    exit 1
-fi
+    echo "Installing MediaMTX binary..."
+    rm -rf "$MEDIAMTX_DIR"/*
+    mv "$BIN_PATH" "$MEDIAMTX_DIR/mediamtx"
+    chmod +x "$MEDIAMTX_DIR/mediamtx"
 
-rm -rf "$MEDIAMTX_DIR"/*
-mv "$MEDIAMTX_BIN" "$MEDIAMTX_DIR/mediamtx"
-chmod +x "$MEDIAMTX_DIR/mediamtx"
+    rm -rf "$MEDIAMTX_STAGE"
+    rm -f "$MEDIAMTX_TAR"
 
-# optional config copy if present
-MEDIAMTX_CFG=$(find "$STAGE_DIR" -type f -name mediamtx.yml | head -1)
-if [[ -n "$MEDIAMTX_CFG" ]]; then
-    mv "$MEDIAMTX_CFG" "$MEDIAMTX_DIR/"
-fi
-
-rm -rf "$STAGE_DIR"
-rm -f "$MEDIAMTX_TAR"
-
-echo "MediaMTX installed successfully."
+    echo "MediaMTX installed successfully."
 
 else
     echo "MediaMTX already present — skipping install."
