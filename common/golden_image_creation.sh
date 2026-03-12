@@ -25,14 +25,20 @@ echo "[Phase 1.5] Installing MediaMTX binary"
 MEDIAMTX_DIR="/opt/birddog/mediamtx"
 MEDIAMTX_TAR="/tmp/mediamtx.tar.gz"
 
+# Fleet default (override in lab with: MEDIAMTX_MODE=latest)
 MEDIAMTX_MODE="${MEDIAMTX_MODE:-pinned}"
-MEDIAMTX_VERSION="v1.8.4"
+
+# Known good fleet version
+MEDIAMTX_VERSION="v1.16.3"
+
+MEDIAMTX_ARCH="linux_arm64"
 
 mkdir -p "$MEDIAMTX_DIR"
 
 if [ ! -f "$MEDIAMTX_DIR/mediamtx" ]; then
 
     echo "MediaMTX mode: $MEDIAMTX_MODE"
+    echo "Architecture : $MEDIAMTX_ARCH"
 
     if [[ "$MEDIAMTX_MODE" == "latest" ]]; then
 
@@ -40,7 +46,7 @@ if [ ! -f "$MEDIAMTX_DIR/mediamtx" ]; then
 
         MEDIAMTX_URL=$(curl -fsSL https://api.github.com/repos/bluenviron/mediamtx/releases/latest \
             | grep browser_download_url \
-            | grep linux_arm64.tar.gz \
+            | grep "${MEDIAMTX_ARCH}.tar.gz" \
             | cut -d '"' -f 4)
 
         if [[ -z "$MEDIAMTX_URL" ]]; then
@@ -52,7 +58,7 @@ if [ ! -f "$MEDIAMTX_DIR/mediamtx" ]; then
 
         echo "Using pinned MediaMTX version: $MEDIAMTX_VERSION"
 
-        MEDIAMTX_URL="https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION#v}_linux_arm64.tar.gz"
+        MEDIAMTX_URL="https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION#v}_${MEDIAMTX_ARCH}.tar.gz"
 
     fi
 
