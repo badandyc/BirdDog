@@ -109,6 +109,7 @@ fetch_file mesh/add_mesh_network.sh $BIRDDOG_ROOT/mesh/add_mesh_network.sh
 fetch_file common/device_configure.sh $BIRDDOG_ROOT/common/device_configure.sh
 fetch_file common/radio_map_setup.sh $BIRDDOG_ROOT/common/radio_map_setup.sh
 fetch_file common/golden_image_creation.sh $BIRDDOG_ROOT/common/golden_image_creation.sh
+fetch_file common/oobe.sh $BIRDDOG_ROOT/common/oobe.sh
 
 echo "$REMOTE_COMMIT" > $COMMIT_FILE
 
