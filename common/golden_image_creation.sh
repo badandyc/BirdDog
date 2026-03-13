@@ -17,14 +17,62 @@ echo "====================================="
 echo ""
 
 # --------------------------------------------------
+# PRE-CHECK — is a full install actually needed?
+# --------------------------------------------------
+
+PRECHECK_PASS=1
+PRECHECK_NOTES=()
+
+BIRDDOG_ROOT="/opt/birddog"
+
+for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar iw wireless-tools; do
+    if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+        PRECHECK_PASS=0
+        PRECHECK_NOTES+=("package missing: $pkg")
+    fi
+done
+
+if [[ ! -f "$BIRDDOG_ROOT/mediamtx/mediamtx" ]]; then
+    PRECHECK_PASS=0
+    PRECHECK_NOTES+=("mediamtx binary missing")
+fi
+
+if [[ ! -f /etc/udev/rules.d/72-birddog-radios.rules ]]; then
+    PRECHECK_PASS=0
+    PRECHECK_NOTES+=("udev radio rules missing")
+fi
+
+if ! systemctl is-enabled birddog-block-onboard-wifi.service >/dev/null 2>&1; then
+    PRECHECK_PASS=0
+    PRECHECK_NOTES+=("onboard WiFi block service not enabled")
+fi
+
+if [[ ! -f /usr/local/bin/mesh ]]; then
+    PRECHECK_PASS=0
+    PRECHECK_NOTES+=("mesh CLI missing")
+fi
+
+# --------------------------------------------------
 # INSTALL MODE
 # --------------------------------------------------
 
 if [[ -z "$BIRDDOG_MODE" ]]; then
     echo "Select install mode:"
     echo ""
-    echo "[F] Full install"
-    echo "[R] Refresh (scripts only)"
+
+    if [[ "$PRECHECK_PASS" -eq 1 ]]; then
+        echo "  [F] Full install  (system verified — full install not required)"
+    else
+        echo "  [F] Full install"
+        echo ""
+        echo "  System check — full install recommended:"
+        for NOTE in "${PRECHECK_NOTES[@]}"; do
+            echo "    • $NOTE"
+        done
+        echo ""
+    fi
+
+    echo "  [R] Refresh (scripts only)"
     echo ""
     read -r -p "Choice: " MODE
 
@@ -38,7 +86,6 @@ fi
 echo "Mode: $BIRDDOG_MODE"
 echo ""
 
-BIRDDOG_ROOT="/opt/birddog"
 VERSION_DIR="$BIRDDOG_ROOT/version"
 COMMIT_FILE="$VERSION_DIR/COMMIT"
 VERSION_FILE="$VERSION_DIR/VERSION"
