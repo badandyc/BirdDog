@@ -2,10 +2,6 @@
 set -e
 set -o pipefail
 
-if [[ "$EUID" -ne 0 ]]; then
-    exec sudo -E bash /opt/birddog/common/golden_image_creation.sh "$@"
-fi
-
 echo "====================================="
 echo "BirdDog Golden Image Creation"
 echo "====================================="
@@ -21,7 +17,7 @@ if [[ -z "$BIRDDOG_MODE" ]]; then
     echo "[F] Full install"
     echo "[R] Refresh (scripts only)"
     echo ""
-    read -r -p "Choice: " MODE
+    read -p "Choice: " MODE
 
     case "$MODE" in
         F|f) BIRDDOG_MODE="full" ;;
@@ -32,6 +28,8 @@ fi
 
 echo "Mode: $BIRDDOG_MODE"
 echo ""
+
+# --------------------------------------------------
 
 BIRDDOG_ROOT="/opt/birddog"
 VERSION_DIR="$BIRDDOG_ROOT/version"
@@ -48,12 +46,12 @@ mkdir -p "$BIRDDOG_ROOT"/{bdm,bdc,mesh,common,mediamtx,web,logs,version}
 if [[ "$BIRDDOG_MODE" == "full" ]]; then
 
     echo "[Phase 0] Updating package index (best effort)"
-    apt update || true
+    sudo apt update || true
 
     echo "[Phase 1] Package Assurance"
 
     for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar; do
-        dpkg -s "$pkg" >/dev/null 2>&1 || apt install -y "$pkg"
+        dpkg -s "$pkg" >/dev/null 2>&1 || sudo apt install -y "$pkg"
     done
 
     echo "[Phase 1.5] Installing MediaMTX"
@@ -136,7 +134,7 @@ fetch_file() {
 
     if [[ ! -f "$2" ]]; then
         echo "NEW $1"
-        install -m 0755 "$TMP" "$2"
+        sudo install -m 0755 "$TMP" "$2"
         return
     fi
 
@@ -145,7 +143,7 @@ fetch_file() {
         rm -f "$TMP"
     else
         echo "UPDATED $1"
-        install -m 0755 "$TMP" "$2"
+        sudo install -m 0755 "$TMP" "$2"
     fi
 }
 
@@ -165,10 +163,26 @@ echo "commit-$REMOTE_COMMIT" > "$VERSION_FILE"
 date -u +"%Y-%m-%dT%H:%M:%SZ" > "$BUILD_FILE"
 
 # --------------------------------------------------
+# INSTALL LIB
+# --------------------------------------------------
+
+echo "[Phase 4] Install Library"
+
+cat << 'EOF' > "$BIRDDOG_ROOT/common/install_lib.sh"
+#!/bin/bash
+LOG_DIR=/opt/birddog/logs
+mkdir -p $LOG_DIR
+exec > >(tee -a $LOG_DIR/install_$(date +%s).log) 2>&1
+EOF
+
+chmod +x "$BIRDDOG_ROOT/common/install_lib.sh"
+source "$BIRDDOG_ROOT/common/install_lib.sh"
+
+# --------------------------------------------------
 # PERMS
 # --------------------------------------------------
 
-echo "[Phase 4] Permissions"
+echo "[Phase 5] Permissions"
 
 chmod +x "$BIRDDOG_ROOT"/common/*.sh
 chmod +x "$BIRDDOG_ROOT"/bdm/*.sh
@@ -176,7 +190,103 @@ chmod +x "$BIRDDOG_ROOT"/bdc/*.sh
 chmod +x "$BIRDDOG_ROOT"/mesh/*.sh
 
 # --------------------------------------------------
+# Phase 6 — Install / Refresh BirdDog CLI
+# --------------------------------------------------
 
-echo "[Phase 5] Finalization"
+echo "[Phase 6] Installing BirdDog CLI"
+
+cat << 'EOF' > /usr/local/bin/birddog
+#!/bin/bash
+set -e
+
+show_help() {
+
+echo ""
+echo "================================="
+echo "         BirdDog CLI"
+echo "================================="
+echo ""
+echo "System:"
+echo "  birddog install      Full or Refresh golden image"
+echo "  birddog configure    Configure node role (BDC / BDM)"
+echo "  birddog update       Refresh scripts from repository"
+echo ""
+echo "Verification:"
+echo "  birddog verify       Check mesh + services"
+echo "  birddog verify-node  Show node identity"
+echo ""
+echo "Operations:"
+echo "  birddog radios       Show radio layout + roles"
+echo "  birddog restart      Restart BirdDog services"
+echo "  birddog status       Show install + commit state"
+echo ""
+echo "================================="
+echo ""
+}
+
+case "$1" in
+
+radios)
+bash /opt/birddog/common/radio_map_setup.sh
+;;
+
+install)
+bash /opt/birddog/common/golden_image_creation.sh
+;;
+
+configure)
+sudo bash /opt/birddog/common/device_configure.sh
+;;
+
+update)
+sudo BIRDDOG_MODE=refresh bash /opt/birddog/common/script_update.sh
+;;
+
+verify)
+echo ""
+echo "Mesh Service:"
+systemctl is-active birddog-mesh.service || true
+echo ""
+;;
+
+verify-node)
+echo ""
+echo "Node:"
+hostname
+echo ""
+;;
+
+restart)
+sudo systemctl restart mediamtx 2>/dev/null || true
+sudo systemctl restart nginx 2>/dev/null || true
+sudo systemctl restart birddog-stream 2>/dev/null || true
+echo "Services restarted."
+;;
+
+status)
+echo ""
+echo "Platform Version:"
+cat /opt/birddog/version/VERSION 2>/dev/null || echo "Unknown"
+echo ""
+echo "Build Time:"
+cat /opt/birddog/version/BUILD 2>/dev/null || echo "Unknown"
+echo ""
+echo "Commit:"
+cat /opt/birddog/version/COMMIT 2>/dev/null || echo "Unknown"
+echo ""
+;;
+
+*)
+show_help
+;;
+
+esac
+EOF
+
+chmod +x /usr/local/bin/birddog
+
+# --------------------------------------------------
+
+echo "[Phase 7] Finalization"
 echo "Golden install complete."
 echo ""
