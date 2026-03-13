@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+set -o pipefail
 
 mkdir -p /opt/birddog
 mkdir -p /opt/birddog/mediamtx
@@ -12,44 +13,57 @@ echo "BirdDog MediaMTX Setup"
 echo "================================="
 date
 
-if [ "$EUID" -ne 0 ]; then
-  echo "Run as root: sudo bash /opt/birddog/bdm/bdm_mediamtx_setup.sh"
-  exit 1
+if [[ "$EUID" -ne 0 ]]; then
+    echo "Run as root: sudo bash /opt/birddog/bdm/bdm_mediamtx_setup.sh"
+    exit 1
 fi
 
 INSTALL_DIR="/opt/birddog/mediamtx"
 BINARY="$INSTALL_DIR/mediamtx"
 CONFIG="$INSTALL_DIR/mediamtx.yml"
 
+# -------------------------------------------------------
+# Verify binary
+# -------------------------------------------------------
+
 echo ""
 echo "=== Verifying MediaMTX binary ==="
 
-if [ ! -f "$BINARY" ]; then
-  echo "ERROR: MediaMTX binary not found at:"
-  echo "$BINARY"
-  echo ""
-  echo "Run golden image creation first."
-  exit 1
+if [[ ! -f "$BINARY" ]]; then
+    echo "ERROR: MediaMTX binary not found at $BINARY"
+    echo "Run birddog install first."
+    exit 1
 fi
 
 chmod +x "$BINARY"
+echo "  Binary OK: $BINARY"
+
+# -------------------------------------------------------
+# Service user
+# -------------------------------------------------------
 
 echo ""
-echo "=== Creating mediamtx service user ==="
+echo "=== Service user ==="
 
 if id -u mediamtx >/dev/null 2>&1; then
-  echo "User 'mediamtx' already exists"
+    echo "  User 'mediamtx' already exists"
 else
-  useradd -r -s /usr/sbin/nologin mediamtx
+    useradd -r -s /usr/sbin/nologin mediamtx
+    echo "  User 'mediamtx' created"
 fi
+
+# -------------------------------------------------------
+# Configuration
+# -------------------------------------------------------
 
 echo ""
 echo "=== Writing configuration ==="
 
-cat > "$CONFIG" <<EOF
+cat > "$CONFIG" << 'EOF'
 logLevel: info
 logDestinations: [stdout]
 
+# Allow any client to publish or read — fleet is trusted
 authMethod: internal
 authInternalUsers:
   - user: any
@@ -67,6 +81,7 @@ apiAllowOrigins: ['*']
 rtsp: true
 rtspAddress: :8554
 
+# Disabled protocols — not needed for BirdDog
 rtmp: false
 hls: false
 srt: false
@@ -86,17 +101,24 @@ paths:
   all_others:
 EOF
 
-echo ""
-echo "=== Setting ownership ==="
+echo "  Config written: $CONFIG"
+
+# -------------------------------------------------------
+# Ownership
+# -------------------------------------------------------
 
 chown -R mediamtx:mediamtx "$INSTALL_DIR"
+
+# -------------------------------------------------------
+# Systemd service
+# -------------------------------------------------------
 
 echo ""
 echo "=== Creating systemd service ==="
 
-cat > /etc/systemd/system/mediamtx.service <<EOF
+cat > /etc/systemd/system/mediamtx.service << EOF
 [Unit]
-Description=BirdDog MediaMTX Server
+Description=BirdDog MediaMTX RTSP/WebRTC Server
 After=network-online.target
 Wants=network-online.target
 
@@ -108,46 +130,48 @@ WorkingDirectory=$INSTALL_DIR
 ExecStart=$BINARY $CONFIG
 Restart=always
 RestartSec=5
-LimitNOFILE=1048576
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-echo ""
-echo "=== Reloading systemd ==="
 systemctl daemon-reload
-
-echo ""
-echo "=== Enabling MediaMTX service ==="
 systemctl enable mediamtx
-
-echo ""
-echo "=== Starting MediaMTX ==="
 systemctl restart mediamtx
+
+# -------------------------------------------------------
+# Verification — use is-active not status to avoid set -e
+# -------------------------------------------------------
 
 echo ""
 echo "=== Verification ==="
 
-echo "--- Service Status ---"
-systemctl status mediamtx --no-pager
+sleep 2
+
+if systemctl is-active --quiet mediamtx; then
+    echo "  mediamtx : running"
+else
+    echo "  mediamtx : NOT running — check: journalctl -u mediamtx"
+fi
 
 echo ""
-echo "--- Listening Ports ---"
-ss -lntp | grep -E '8554|8889|9997' || true
+echo "--- Listening ports ---"
+ss -lntp | grep -E '8554|8889|9997' || echo "  (ports not yet open)"
 
 echo ""
-echo "--- API Test ---"
-curl -s http://localhost:9997/v3/paths/list || true
+echo "--- API test ---"
+curl -s --connect-timeout 3 http://localhost:9997/v3/paths/list 2>/dev/null \
+    && echo "" \
+    || echo "  API not responding yet — service may still be starting"
 
 echo ""
 echo "================================="
 echo "MediaMTX Setup Complete"
 echo "================================="
 echo ""
-echo "RTSP Server : rtsp://<BDM-IP>:8554"
-echo "WebRTC Port : 8889"
-echo "API         : http://<BDM-IP>:9997"
+echo "  RTSP  : rtsp://$(hostname).local:8554/<stream>"
+echo "  WebRTC: http://$(hostname).local:8889/<stream>"
+echo "  API   : http://$(hostname).local:9997/v3/paths/list"
 echo ""
-echo "Install log saved to:"
-echo "$LOG"
+echo "Install log: $LOG"
+echo ""
