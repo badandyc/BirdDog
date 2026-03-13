@@ -70,8 +70,8 @@ if [[ "$BIRDDOG_MODE" == "full" ]]; then
     MEDIAMTX_TAR="/tmp/mediamtx.tar.gz"
     MEDIAMTX_VERSION="v1.16.3"
 
-    # Pi 3B is armv7l (32-bit) — must use arm7 build, NOT arm64
-    MEDIAMTX_URL="https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_arm7.tar.gz"
+    # Pi 3B running 64-bit Pi OS (aarch64)
+    MEDIAMTX_URL="https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_arm64.tar.gz"
 
     mkdir -p "$MEDIAMTX_DIR"
 
