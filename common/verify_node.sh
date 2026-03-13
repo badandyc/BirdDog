@@ -14,13 +14,17 @@ ROLE="UNKNOWN"
 [[ "$HOST" =~ ^bdm-[0-9]{2}$ ]] && ROLE="BDM"
 [[ "$HOST" =~ ^bdc-[0-9]{2}$ ]] && ROLE="BDC"
 
+echo ""
+echo "  Node : $HOST"
+echo "  Role : $ROLE"
+echo ""
+
 NODE_NUM=$(echo "$HOST" | grep -oE '[0-9]{2}' || echo "00")
 MESH_IP="10.10.20.$((10#$NODE_NUM * 10))"
 
-echo ""
-echo "  Node    : $HOST"
-echo "  Role    : $ROLE"
-echo "  Mesh IP : $MESH_IP"
+if [[ "$ROLE" != "UNKNOWN" ]]; then
+    echo "  Mesh IP : $MESH_IP"
+fi
 echo ""
 
 FAIL=0
@@ -39,10 +43,11 @@ echo "Identity"
 echo "---------------------------------"
 
 if [[ "$ROLE" == "UNKNOWN" ]]; then
-    fail "Hostname not configured (currently: $HOST)"
-    echo ""
-    echo "  Run: birddog configure"
-    echo ""
+    if [[ "$HOST" == "birddog" ]]; then
+        warn "Node not configured — golden image baseline (run: birddog configure)"
+    else
+        warn "Node not configured — hostname '$HOST' not a valid role (run: birddog configure)"
+    fi
 else
     pass "Hostname valid: $HOST"
 fi
@@ -73,9 +78,9 @@ echo "---------------------------------"
 
 if ip link show wlan0 >/dev/null 2>&1; then
     STATE=$(ip link show wlan0 | awk '/state/{print $9}')
-    pass "wlan0 present (onboard — expected $STATE/blocked)"
+    pass "wlan0 present (onboard — $STATE, blocked)"
 else
-    warn "wlan0 not present (onboard BCM — check udev rules)"
+    warn "wlan0 not present — check udev rules"
 fi
 
 if ip link show wlan1 >/dev/null 2>&1; then
@@ -104,35 +109,41 @@ echo "Mesh"
 echo "---------------------------------"
 
 if systemctl is-active --quiet birddog-mesh.service; then
-    pass "birddog-mesh running"
+    pass "birddog-mesh service running"
 else
-    warn "birddog-mesh not running"
+    warn "birddog-mesh service not running"
 fi
 
-if iw dev wlan1 info 2>/dev/null | grep -q "mesh id birddog-mesh"; then
-    pass "wlan1 joined mesh: birddog-mesh"
+# Check interface type — mesh daemon sets type to "mesh point"
+WLAN1_TYPE=$(iw dev wlan1 info 2>/dev/null | awk '/type/{print $2}')
+if [[ "$WLAN1_TYPE" == "mesh" ]]; then
+    pass "wlan1 in mesh mode"
 else
-    warn "wlan1 not in mesh — may still be converging"
+    warn "wlan1 not in mesh mode (type: ${WLAN1_TYPE:-unknown}) — may still be converging"
 fi
 
-if ip addr show wlan1 2>/dev/null | grep -q "$MESH_IP"; then
-    pass "Mesh IP assigned: $MESH_IP"
-else
-    warn "Mesh IP $MESH_IP not on wlan1"
-fi
-
-# Check for at least one reachable mesh peer
-PEER_FOUND=0
-for slot in $(seq 1 5); do
-    TARGET="10.10.20.$((slot * 10))"
-    [[ "$TARGET" == "$MESH_IP" ]] && continue
-    if ping -c1 -W1 "$TARGET" >/dev/null 2>&1; then
-        pass "Mesh peer reachable: $TARGET"
-        PEER_FOUND=1
-        break
+if [[ "$ROLE" != "UNKNOWN" ]]; then
+    if ip addr show wlan1 2>/dev/null | grep -q "$MESH_IP"; then
+        pass "Mesh IP assigned: $MESH_IP"
+    else
+        warn "Mesh IP $MESH_IP not on wlan1 — may still be converging"
     fi
-done
-[[ "$PEER_FOUND" -eq 0 ]] && warn "No mesh peers reachable yet"
+fi
+
+# Check for at least one reachable mesh peer (only meaningful when configured)
+if [[ "$ROLE" != "UNKNOWN" ]]; then
+    PEER_FOUND=0
+    for slot in $(seq 1 5); do
+        TARGET="10.10.20.$((slot * 10))"
+        [[ "$TARGET" == "$MESH_IP" ]] && continue
+        if ping -c1 -W1 "$TARGET" >/dev/null 2>&1; then
+            pass "Mesh peer reachable: $TARGET"
+            PEER_FOUND=1
+            break
+        fi
+    done
+    [[ "$PEER_FOUND" -eq 0 ]] && warn "No mesh peers reachable yet"
+fi
 
 # -------------------------------------------------------
 # Role-specific checks — BDM
@@ -182,7 +193,6 @@ if [[ "$ROLE" == "BDM" ]]; then
         && pass "API port 9997 open" \
         || warn "API port 9997 closed"
 
-    STREAM_COUNT=0
     if curl -s --connect-timeout 3 http://localhost:9997/v3/paths/list >/dev/null 2>&1; then
         pass "MediaMTX API responding"
         STREAM_COUNT=$(curl -s http://localhost:9997/v3/paths/list \
@@ -223,12 +233,12 @@ if [[ "$ROLE" == "BDC" ]]; then
     echo "---------------------------------"
 
     if [[ -f "$BIRDDOG_ROOT/bdc/bdc.conf" ]]; then
+        # shellcheck source=/dev/null
         source "$BIRDDOG_ROOT/bdc/bdc.conf"
         pass "BDC config present"
         echo "     BDM Host  : $BDM_HOST"
         echo "     Stream    : $STREAM_NAME"
 
-        # Check BDM is reachable over mesh
         if ping -c1 -W2 "$BDM_HOST" >/dev/null 2>&1; then
             pass "BDM reachable: $BDM_HOST"
         else
@@ -263,6 +273,11 @@ if [[ "$FAIL" -eq 1 ]]; then
     echo "NODE STATUS: FAILED"
     echo "================================="
     exit 1
+elif [[ "$ROLE" == "UNKNOWN" ]]; then
+    echo "NODE STATUS: NOT CONFIGURED"
+    echo "================================="
+    echo "  Run: birddog configure"
+    exit 0
 elif [[ "$WARN" -eq 1 ]]; then
     echo "NODE STATUS: DEGRADED"
     echo "================================="
