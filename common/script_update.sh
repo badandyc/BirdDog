@@ -59,6 +59,19 @@ echo "[Update] Fetching scripts"
 
 FETCH_FAILED=0
 SELF_UPDATED=0
+REBOOT_NEEDED=0
+
+# Scripts that affect running services and require reboot when changed
+REBOOT_SCRIPTS=(
+    "common/script_update.sh"
+    "common/golden_image_creation.sh"
+    "common/device_configure.sh"
+    "bdm/bdm_AP_setup.sh"
+    "bdm/bdm_mediamtx_setup.sh"
+    "bdm/bdm_web_setup.sh"
+    "bdc/bdc_fresh_install_setup.sh"
+    "mesh/add_mesh_network.sh"
+)
 
 fetch_file() {
     local SRC="$1"
@@ -84,6 +97,7 @@ fetch_file() {
             echo "  STAGED    $SRC  (will activate after fetch completes)"
             install -m 0755 "$TMP" "${DEST}.new"
             SELF_UPDATED=1
+            REBOOT_NEEDED=1
         fi
         return
     fi
@@ -91,12 +105,18 @@ fetch_file() {
     if [[ ! -f "$DEST" ]]; then
         echo "  NEW       $SRC"
         install -m 0755 "$TMP" "$DEST"
+        for RS in "${REBOOT_SCRIPTS[@]}"; do
+            [[ "$SRC" == "$RS" ]] && REBOOT_NEEDED=1
+        done
     elif cmp -s "$TMP" "$DEST"; then
         echo "  UNCHANGED $SRC"
         rm -f "$TMP"
     else
         echo "  UPDATED   $SRC"
         install -m 0755 "$TMP" "$DEST"
+        for RS in "${REBOOT_SCRIPTS[@]}"; do
+            [[ "$SRC" == "$RS" ]] && REBOOT_NEEDED=1
+        done
     fi
 }
 
@@ -165,5 +185,9 @@ echo "BirdDog update complete"
 echo "  Commit : $REMOTE_COMMIT"
 echo "====================================="
 echo ""
-echo "Reboot recommended to apply any service script changes."
-echo ""
+
+if [[ "$REBOOT_NEEDED" -eq 1 ]]; then
+    echo "  ⚠  Reboot recommended — service scripts were updated."
+    echo "     sudo reboot"
+    echo ""
+fi
