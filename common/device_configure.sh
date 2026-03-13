@@ -1,13 +1,13 @@
 #!/bin/bash
 set -e
+set -o pipefail
 
 echo "====================================="
 echo "BirdDog Device Configuration"
 echo "====================================="
 
-if [ "$EUID" -ne 0 ]; then
-echo "Run as root: sudo birddog configure"
-exit 1
+if [[ "$EUID" -ne 0 ]]; then
+    exec sudo -E bash /opt/birddog/common/device_configure.sh "$@"
 fi
 
 BDC_CONFIG="/opt/birddog/bdc/bdc.conf"
@@ -22,25 +22,22 @@ echo "-------------------------------------"
 
 if [[ "$CURRENT_HOST" =~ ^bdc-[0-9]{2}$ && -f "$BDC_CONFIG" ]]; then
 
-source "$BDC_CONFIG"
+    source "$BDC_CONFIG"
 
-if [[ -n "$BDM_HOST" ]]; then
-echo ""
-echo "Existing configuration detected:"
-echo "BDC Hostname : $CURRENT_HOST"
-echo "BDM Host     : $BDM_HOST"
-echo ""
-read -p "Keep current BDC and BDM settings? (y/n): " KEEP_ALL
+    if [[ -n "$BDM_HOST" ]]; then
+        echo ""
+        echo "Existing configuration detected:"
+        echo "BDC Hostname : $CURRENT_HOST"
+        echo "BDM Host     : $BDM_HOST"
+        echo ""
 
-```
-if [[ "$KEEP_ALL" =~ ^[Yy]$ ]]; then
-    HOSTNAME_INPUT="$CURRENT_HOST"
-    REUSE_ALL=1
-fi
-```
+        read -r -p "Keep current BDC and BDM settings? (y/n): " KEEP_ALL
 
-fi
-
+        if [[ "$KEEP_ALL" =~ ^[Yy]$ ]]; then
+            HOSTNAME_INPUT="$CURRENT_HOST"
+            REUSE_ALL=1
+        fi
+    fi
 fi
 
 echo ""
@@ -50,19 +47,18 @@ echo "-------------------------------------"
 
 if [[ "$REUSE_ALL" != "1" ]]; then
 
-while true
-do
-read -p "Enter BirdDog hostname (bdm-## or bdc-##): " HOSTNAME_INPUT
+    while true
+    do
+        read -r -p "Enter BirdDog hostname (bdm-## or bdc-##): " HOSTNAME_INPUT
 
-```
-if [[ "$HOSTNAME_INPUT" =~ ^bd[cm]-[0-9]{2}$ ]]; then
-    break
-fi
+        [[ -z "$HOSTNAME_INPUT" ]] && continue
 
-echo "Invalid hostname format (must be bdm-01 or bdc-01)"
-```
+        if [[ "$HOSTNAME_INPUT" =~ ^bd[cm]-[0-9]{2}$ ]]; then
+            break
+        fi
 
-done
+        echo "Invalid hostname format (must be bdm-01 or bdc-01)"
+    done
 
 fi
 
@@ -81,8 +77,8 @@ echo "-------------------------------------"
 echo "Phase 3 — Avahi + Host Table Setup"
 echo "-------------------------------------"
 
-if [ -f /etc/cloud/cloud.cfg ]; then
-sed -i 's/^manage_etc_hosts:.*/manage_etc_hosts: false/' /etc/cloud/cloud.cfg || true
+if [[ -f /etc/cloud/cloud.cfg ]]; then
+    sed -i 's/^manage_etc_hosts:.*/manage_etc_hosts: false/' /etc/cloud/cloud.cfg || true
 fi
 
 rm -rf /var/lib/avahi-daemon/* 2>/dev/null || true
@@ -104,13 +100,12 @@ EOF
 
 for slot in $(seq 1 25)
 do
-IP="10.10.20.$((slot*10))"
-BDC_NAME="bdc-$(printf "%02d" $slot)"
-BDM_NAME="bdm-$(printf "%02d" $slot)"
+    IP="10.10.20.$((slot*10))"
+    BDC_NAME="bdc-$(printf "%02d" $slot)"
+    BDM_NAME="bdm-$(printf "%02d" $slot)"
 
-echo "$IP $BDC_NAME" >> "$TMP_HOSTS"
-echo "$IP $BDM_NAME" >> "$TMP_HOSTS"
-
+    echo "$IP $BDC_NAME" >> "$TMP_HOSTS"
+    echo "$IP $BDM_NAME" >> "$TMP_HOSTS"
 done
 
 mv "$TMP_HOSTS" /etc/hosts
@@ -133,48 +128,48 @@ echo "-------------------------------------"
 
 if [[ "$ROLE" == "bdc" ]]; then
 
-if [[ "$REUSE_ALL" == "1" ]]; then
-echo ""
-echo "[BDC] Reusing existing configuration..."
-else
+    if [[ "$REUSE_ALL" == "1" ]]; then
+        echo ""
+        echo "[BDC] Reusing existing configuration..."
+    else
 
-```
-while true
-do
-    read -p "Enter BDM hostname (without .local): " BDM_NAME
+        while true
+        do
+            read -r -p "Enter BDM hostname (without .local): " BDM_NAME
 
-    if [[ "$BDM_NAME" =~ ^bdm-[0-9]{2}$ ]]; then
-        break
+            [[ -z "$BDM_NAME" ]] && continue
+
+            if [[ "$BDM_NAME" =~ ^bdm-[0-9]{2}$ ]]; then
+                break
+            fi
+
+            echo "Invalid BDM hostname format"
+        done
+
+        BDM_HOST="${BDM_NAME}.local"
     fi
 
-    echo "Invalid BDM hostname format"
-done
+    echo ""
+    echo "[BDC] Running installer..."
 
-BDM_HOST="${BDM_NAME}.local"
-```
-
-fi
-
-echo ""
-echo "[BDC] Running installer..."
-bash /opt/birddog/bdc/bdc_fresh_install_setup.sh 
-"$HOSTNAME_INPUT" 
-"$BDM_HOST" 
-"$STREAM_NAME"
+    bash /opt/birddog/bdc/bdc_fresh_install_setup.sh \
+        "$HOSTNAME_INPUT" \
+        "$BDM_HOST" \
+        "$STREAM_NAME"
 
 elif [[ "$ROLE" == "bdm" ]]; then
 
-echo ""
-echo "[BDM] Running installer..."
+    echo ""
+    echo "[BDM] Running installer..."
 
-bash /opt/birddog/bdm/bdm_initial_setup.sh "$HOSTNAME_INPUT"
-bash /opt/birddog/bdm/bdm_AP_setup.sh
-bash /opt/birddog/bdm/bdm_mediamtx_setup.sh
-bash /opt/birddog/bdm/bdm_web_setup.sh
+    bash /opt/birddog/bdm/bdm_initial_setup.sh "$HOSTNAME_INPUT"
+    bash /opt/birddog/bdm/bdm_AP_setup.sh
+    bash /opt/birddog/bdm/bdm_mediamtx_setup.sh
+    bash /opt/birddog/bdm/bdm_web_setup.sh
 
 else
-echo "Unknown role"
-exit 1
+    echo "Unknown role"
+    exit 1
 fi
 
 echo ""
@@ -188,8 +183,8 @@ echo "Waiting for mesh service..."
 sleep 3
 
 if ! systemctl is-active --quiet birddog-mesh.service; then
-echo "ERROR: Mesh service failed to start"
-exit 1
+    echo "ERROR: Mesh service failed to start"
+    exit 1
 fi
 
 echo ""
