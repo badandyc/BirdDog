@@ -2,113 +2,126 @@
 set -e
 set -o pipefail
 
-echo "================================="
-echo "BirdDog Radio Mapping Installer"
-echo "================================="
+echo "====================================="
+echo "BirdDog Device Configuration"
+echo "====================================="
 
-INSTALL_ONLY=0
-[[ "$1" == "--install-only" ]] && INSTALL_ONLY=1
+if [[ "$EUID" -ne 0 ]]; then
+    exec sudo -E bash /opt/birddog/common/device_configure.sh "$@"
+fi
 
-BIRDDOG_ROOT="/opt/birddog"
-RADIO_DIR="$BIRDDOG_ROOT/radio"
-RUNTIME_SCRIPT="/usr/local/bin/birddog-radio-map.sh"
-SERVICE_FILE="/etc/systemd/system/birddog-radio-map.service"
-LOG_FILE="$RADIO_DIR/radio_map.log"
+BDC_CONFIG="/opt/birddog/bdc/bdc.conf"
+CURRENT_HOST=$(hostname)
 
-mkdir -p "$RADIO_DIR"
+REUSE_ALL=0
 
 echo ""
-echo "Installing radio mapping runtime..."
+echo "-------------------------------------"
+echo "Phase 1 — Existing Configuration Check"
+echo "-------------------------------------"
 
-cat << 'EOF' > "$RUNTIME_SCRIPT"
-#!/bin/bash
-set -e
-set -o pipefail
+if [[ "$CURRENT_HOST" =~ ^bdc-[0-9]{2}$ && -f "$BDC_CONFIG" ]]; then
 
-LOG="/opt/birddog/radio/radio_map.log"
-exec >> "$LOG" 2>&1
+    source "$BDC_CONFIG"
 
-echo "================================="
-echo "BirdDog Radio Mapping Runtime"
-echo "================================="
-date
+    if [[ -n "$BDM_HOST" ]]; then
+        echo ""
+        echo "Existing configuration detected:"
+        echo "BDC Hostname : $CURRENT_HOST"
+        echo "BDM Host     : $BDM_HOST"
+        echo ""
 
-ACTIVE_IF=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $5; exit}')
+        read -r -p "Keep current BDC and BDM settings? (y/n): " KEEP_ALL
 
-echo "Active management interface: $ACTIVE_IF"
-
-for IFACE in wlan0 wlan1 wlan2
-do
-    if ip link show "$IFACE" >/dev/null 2>&1; then
-
-        if [[ "$IFACE" == "$ACTIVE_IF" ]]; then
-            echo "Skipping active transport interface: $IFACE"
-            continue
+        if [[ "$KEEP_ALL" =~ ^[Yy]$ ]]; then
+            HOSTNAME_INPUT="$CURRENT_HOST"
+            REUSE_ALL=1
         fi
-
-        echo "Configuring $IFACE"
-
-        ip link set "$IFACE" down || true
-        iw dev "$IFACE" set type managed || true
-        ip link set "$IFACE" up || true
-
-    else
-        echo "$IFACE not present"
     fi
-done
-
-echo ""
-echo "Final radio state:"
-iw dev || true
-
-echo ""
-echo "Radio mapping runtime complete"
-EOF
-
-chmod +x "$RUNTIME_SCRIPT"
-
-echo ""
-echo "Installing systemd service..."
-
-cat << EOF > "$SERVICE_FILE"
-[Unit]
-Description=BirdDog Radio Mapping
-DefaultDependencies=no
-Before=network-pre.target
-Wants=network-pre.target
-
-[Service]
-Type=oneshot
-ExecStart=$RUNTIME_SCRIPT
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable birddog-radio-map.service
-
-echo ""
-echo "================================="
-echo "Radio mapping service installed"
-echo "Runs automatically at boot"
-echo "Log: $LOG_FILE"
-echo "================================="
-
-if [[ "$INSTALL_ONLY" -eq 1 ]]; then
-    echo ""
-    echo "NOTE: Radio mapping changes apply at next reboot."
-    echo ""
-    exit 0
 fi
 
 echo ""
-echo "Manual execution requested — running runtime mapping now"
-echo ""
+echo "-------------------------------------"
+echo "Phase 2 — Hostname Selection"
+echo "-------------------------------------"
 
-"$RUNTIME_SCRIPT"
+if [[ "$REUSE_ALL" != "1" ]]; then
+
+    while true
+    do
+        read -r -p "Enter BirdDog hostname (bdm-## or bdc-##): " HOSTNAME_INPUT
+
+        [[ -z "$HOSTNAME_INPUT" ]] && continue
+
+        if [[ "$HOSTNAME_INPUT" =~ ^bd[cm]-[0-9]{2}$ ]]; then
+            break
+        fi
+
+        echo "Invalid hostname format (must be bdm-01 or bdc-01)"
+    done
+
+fi
+
+ROLE=$(echo "$HOSTNAME_INPUT" | cut -d- -f1)
+NODE_NUM=$(echo "$HOSTNAME_INPUT" | cut -d- -f2)
+STREAM_NAME="cam${NODE_NUM}"
 
 echo ""
-echo "Radio mapping execution complete"
+echo "Applying hostname: $HOSTNAME_INPUT"
+
+hostnamectl set-hostname "$HOSTNAME_INPUT"
+hostname "$HOSTNAME_INPUT"
+
 echo ""
+echo "-------------------------------------"
+echo "Phase 3 — Avahi + Host Table Setup"
+echo "-------------------------------------"
+
+if [[ -f /etc/cloud/cloud.cfg ]]; then
+    sed -i 's/^manage_etc_hosts:.*/manage_etc_hosts: false/' /etc/cloud/cloud.cfg || true
+fi
+
+rm -rf /var/lib/avahi-daemon/* 2>/dev/null || true
+systemctl restart avahi-daemon 2>/dev/null || true
+
+TMP_HOSTS="/tmp/birddog_hosts"
+
+cat <<EOF > "$TMP_HOSTS"
+127.0.0.1 localhost
+127.0.1.1 $HOSTNAME_INPUT
+
+::1 localhost ip6-localhost ip6-loopback
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+
+# BirdDog Mesh Nodes
+
+EOF
+
+for slot in $(seq 1 25)
+do
+    IP="10.10.20.$((slot*10))"
+    BDC_NAME="bdc-$(printf "%02d" $slot)"
+    BDM_NAME="bdm-$(printf "%02d" $slot)"
+
+    echo "$IP $BDC_NAME" >> "$TMP_HOSTS"
+    echo "$IP $BDM_NAME" >> "$TMP_HOSTS"
+done
+
+mv "$TMP_HOSTS" /etc/hosts
+
+echo ""
+echo "-------------------------------------"
+echo "Phase 4 — Radio Mapping (Staged)"
+echo "-------------------------------------"
+
+bash /opt/birddog/common/radio_map_setup.sh --install-only
+
+echo ""
+echo "Radio mapping staged."
+echo "Deterministic radio layout will apply at next reboot."
+
+echo ""
+echo "-------------------------------------"
+echo "Phase 5 — Role Installer"
+echo "-------------------------
