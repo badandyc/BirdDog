@@ -167,7 +167,7 @@ mkdir -p /etc/systemd/system/hostapd.service.d
 
 cat > /etc/systemd/system/hostapd.service.d/birddog.conf << EOF
 [Unit]
-After=systemd-networkd.service birddog-radio-map.service
+After=systemd-networkd.service
 
 [Service]
 ExecStartPre=/usr/sbin/rfkill unblock wifi
