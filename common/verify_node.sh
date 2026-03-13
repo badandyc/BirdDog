@@ -239,8 +239,10 @@ if [[ "$ROLE" == "BDC" ]]; then
         echo "     BDM Host  : $BDM_HOST"
         echo "     Stream    : $STREAM_NAME"
 
-        if ping -c1 -W2 "$BDM_HOST" >/dev/null 2>&1; then
-            pass "BDM reachable: $BDM_HOST"
+        if ping -c1 -W2 -I wlan1 "$BDM_HOST" >/dev/null 2>&1; then
+            pass "BDM reachable: $BDM_HOST (mesh)"
+        elif ping -c1 -W2 "$BDM_HOST" >/dev/null 2>&1; then
+            pass "BDM reachable: $BDM_HOST (eth0 — mesh not yet available)"
         else
             warn "BDM not reachable: $BDM_HOST — mesh may still be converging"
         fi
@@ -256,9 +258,15 @@ if [[ "$ROLE" == "BDC" ]]; then
         && pass "rpicam-vid capturing" \
         || warn "rpicam-vid not active — check camera ribbon cable"
 
-    pgrep -f ffmpeg >/dev/null 2>&1 \
-        && pass "ffmpeg streaming" \
-        || warn "ffmpeg not running — BDM may be unreachable"
+    if pgrep -f ffmpeg >/dev/null 2>&1; then
+        if ping -c1 -W1 -I wlan1 "$BDM_HOST" >/dev/null 2>&1; then
+            pass "ffmpeg streaming (mesh)"
+        else
+            pass "ffmpeg streaming (eth0 — mesh not yet available)"
+        fi
+    else
+        warn "ffmpeg not running — BDM may be unreachable"
+    fi
 
 fi
 
