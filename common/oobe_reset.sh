@@ -214,7 +214,11 @@ done
 echo ""
 echo "  Services:"
 for SVC in birddog-mesh birddog-stream mediamtx hostapd dnsmasq nginx; do
-    STATE=$(systemctl is-enabled "${SVC}.service" 2>/dev/null || echo "not-found")
+    STATE=$(systemctl is-enabled "${SVC}.service" 2>/dev/null || true)
+    [[ -z "$STATE" ]] && STATE="not-found"
+    if [[ "$SVC" == "dnsmasq" || "$SVC" == "nginx" ]] && [[ "$STATE" == "enabled" ]]; then
+        STATE="enabled (by design)"
+    fi
     echo "    ${SVC}  →  $STATE"
 done
 
