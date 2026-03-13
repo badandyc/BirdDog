@@ -63,7 +63,6 @@ REBOOT_NEEDED=0
 
 # Scripts that affect running services and require reboot when changed
 REBOOT_SCRIPTS=(
-    "common/script_update.sh"
     "common/golden_image_creation.sh"
     "common/device_configure.sh"
     "bdm/bdm_AP_setup.sh"
@@ -97,7 +96,6 @@ fetch_file() {
             echo "  STAGED    $SRC  (will activate after fetch completes)"
             install -m 0755 "$TMP" "${DEST}.new"
             SELF_UPDATED=1
-            REBOOT_NEEDED=1
         fi
         return
     fi
