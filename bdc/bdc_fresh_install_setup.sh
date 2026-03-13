@@ -69,7 +69,7 @@ echo "Capturing 3 second camera test..."
 
 CAMERA_OK=0
 
-if rpicam-vid -t 3000 --nopreview -o "$TEST_FILE" 2>/dev/null; then
+if rpicam-vid -t 5000 --nopreview -o "$TEST_FILE" 2>/dev/null; then
     FILE_SIZE=0
     [[ -f "$TEST_FILE" ]] && FILE_SIZE=$(stat -c%s "$TEST_FILE")
 
@@ -130,7 +130,7 @@ mkfifo "$PIPE"
 echo "Starting camera capture..."
 
 rpicam-vid -t 0 --nopreview \
-    --width 1280 --height 720 \
+    --width 640 --height 480 \
     --framerate 30 \
     --intra 30 --inline \
     -o "$PIPE" &
