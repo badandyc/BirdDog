@@ -214,7 +214,6 @@ fetch_file common/script_update.sh          "$BIRDDOG_ROOT/common/script_update.
 fetch_file common/device_configure.sh       "$BIRDDOG_ROOT/common/device_configure.sh"
 fetch_file common/oobe_reset.sh             "$BIRDDOG_ROOT/common/oobe_reset.sh"
 fetch_file common/verify_node.sh            "$BIRDDOG_ROOT/common/verify_node.sh"
-fetch_file bdm/bdm_initial_setup.sh         "$BIRDDOG_ROOT/bdm/bdm_initial_setup.sh"
 fetch_file bdm/bdm_AP_setup.sh              "$BIRDDOG_ROOT/bdm/bdm_AP_setup.sh"
 fetch_file bdm/bdm_mediamtx_setup.sh        "$BIRDDOG_ROOT/bdm/bdm_mediamtx_setup.sh"
 fetch_file bdm/bdm_web_setup.sh             "$BIRDDOG_ROOT/bdm/bdm_web_setup.sh"
