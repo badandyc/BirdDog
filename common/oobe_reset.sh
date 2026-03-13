@@ -187,9 +187,31 @@ done
 
 echo ""
 echo "BirdDog Services:"
-systemctl is-enabled birddog-mesh.service 2>/dev/null || echo "   mesh: not installed"
-systemctl is-enabled mediamtx.service 2>/dev/null || true
-systemctl is-enabled hostapd.service 2>/dev/null || true
+
+svc_state() {
+
+    SVC="$1"
+
+    if ! systemctl list-unit-files | grep -q "^$SVC"; then
+        echo "   $SVC → not installed"
+        return
+    fi
+
+    STATE=$(systemctl is-enabled "$SVC" 2>/dev/null || true)
+
+    case "$STATE" in
+        enabled)  echo "   $SVC → enabled" ;;
+        disabled) echo "   $SVC → disabled" ;;
+        masked)   echo "   $SVC → masked" ;;
+        *)        echo "   $SVC → present (state unknown)" ;;
+    esac
+}
+
+svc_state birddog-mesh.service
+svc_state mediamtx.service
+svc_state hostapd.service
+svc_state dnsmasq.service
+svc_state nginx.service
 
 set +x
 
