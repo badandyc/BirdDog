@@ -83,10 +83,33 @@ remove_path /usr/local/bin/birddog-stream.sh
 step "Clearing BirdDog runtime state"
 
 remove_path /opt/birddog/logs
-remove_path /opt/birddog/mesh
 remove_path /opt/birddog/radio
 remove_path /opt/birddog/web
 remove_path /opt/birddog/bdc/bdc.conf
+
+echo ""
+echo "Cleaning mesh runtime state (preserving lifecycle script)"
+
+MESH_DIR="/opt/birddog/mesh"
+PRESERVE="$MESH_DIR/add_mesh_network.sh"
+
+if [[ -d "$MESH_DIR" ]]; then
+
+    if [[ -f "$PRESERVE" ]]; then
+        echo "Preserving: $PRESERVE"
+    else
+        echo "Lifecycle script not present — runtime cleanup will still proceed"
+    fi
+
+    find "$MESH_DIR" -mindepth 1 \
+        ! -path "$PRESERVE" \
+        -exec rm -rf {} +
+
+    echo "Mesh runtime state cleaned."
+
+else
+    echo "$MESH_DIR not present — nothing to clean."
+fi
 
 mkdir -p /opt/birddog/logs
 mkdir -p /opt/birddog/mesh
