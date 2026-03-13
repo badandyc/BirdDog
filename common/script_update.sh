@@ -183,11 +183,13 @@ echo ""
 echo "====================================="
 echo "BirdDog update complete"
 echo "  Commit : $REMOTE_COMMIT"
+if [[ "$REBOOT_NEEDED" -eq 1 ]]; then
+    echo "  ⚠  Reboot recommended"
+fi
 echo "====================================="
 echo ""
-
 if [[ "$REBOOT_NEEDED" -eq 1 ]]; then
-    echo "  ⚠  Reboot recommended — service scripts were updated."
+    echo "  Service scripts were updated — reboot to apply."
     echo "     sudo reboot"
     echo ""
 fi
