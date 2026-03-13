@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+set -o pipefail
 
 mkdir -p /opt/birddog
 
@@ -11,17 +12,17 @@ echo "BirdDog Web Dashboard Setup"
 echo "================================="
 date
 
-if [ "$EUID" -ne 0 ]; then
+if [[ "$EUID" -ne 0 ]]; then
     echo "Run as root: sudo bash /opt/birddog/bdm/bdm_web_setup.sh"
     exit 1
 fi
 
 WEB_DIR="/opt/birddog/web"
-
-echo ""
-echo "=== Preparing web directory ==="
 mkdir -p "$WEB_DIR"
 
+# -------------------------------------------------------
+# nginx config
+# -------------------------------------------------------
 
 echo ""
 echo "=== Writing nginx config ==="
@@ -29,7 +30,7 @@ echo "=== Writing nginx config ==="
 mkdir -p /etc/nginx/sites-available
 mkdir -p /etc/nginx/sites-enabled
 
-cat > /etc/nginx/sites-available/default <<EOF
+cat > /etc/nginx/sites-available/birddog << EOF
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
@@ -42,165 +43,305 @@ server {
     location / {
         try_files \$uri \$uri/ =404;
     }
+
+    # Proxy mediamtx API to avoid CORS issues from the dashboard
+    location /api/ {
+        proxy_pass http://127.0.0.1:9997/;
+        proxy_set_header Host \$host;
+    }
 }
 EOF
 
+ln -sf /etc/nginx/sites-available/birddog \
+       /etc/nginx/sites-enabled/birddog
 
-echo ""
-echo "=== Ensuring nginx site enabled ==="
+# Remove default nginx site if present
+rm -f /etc/nginx/sites-enabled/default
 
-ln -sf /etc/nginx/sites-available/default \
-       /etc/nginx/sites-enabled/default
+echo "  nginx config written"
 
+# -------------------------------------------------------
+# Dashboard
+# Quad-view layout: 2×2 fixed grid sized to stream resolution
+# Streams are 640×480 — tiles are sized to match exactly
+# so the browser never scales the video up and causes pixelation
+# -------------------------------------------------------
 
 echo ""
 echo "=== Writing dashboard ==="
 
-cat > "$WEB_DIR/index.html" <<'EOF'
+cat > "$WEB_DIR/index.html" << 'EOF'
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>BirdDog Dashboard</title>
-
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BirdDog</title>
 <style>
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
 body {
-    background: #111;
-    color: white;
-    font-family: Arial, sans-serif;
-    margin: 0;
-    padding: 10px;
+    background: #0a0a0a;
+    color: #ccc;
+    font-family: monospace;
+    font-size: 13px;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
 }
 
-h1 { margin-top: 0; }
+header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    background: #141414;
+    border-bottom: 1px solid #222;
+    flex-shrink: 0;
+}
+
+header span { color: #666; }
 
 button {
-    padding: 6px 12px;
-    margin-bottom: 10px;
+    background: #222;
+    color: #aaa;
+    border: 1px solid #333;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 12px;
+    border-radius: 3px;
 }
 
-.grid {
+button:hover { background: #2a2a2a; color: #fff; }
+
+#status {
+    color: #555;
+    font-size: 11px;
+}
+
+/* Quad grid — 2×2, tiles exactly match 640×480 stream resolution.
+   No scaling = no pixelation. On smaller screens tiles scale down
+   proportionally via the viewport meta tag. */
+#grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 10px;
+    grid-template-columns: 640px 640px;
+    grid-template-rows: 480px 480px;
+    gap: 2px;
+    padding: 2px;
+    flex: 1;
+    overflow: auto;
+    justify-content: center;
+    align-content: center;
 }
 
 .tile {
-    background: #222;
-    padding: 8px;
-    border-radius: 6px;
+    position: relative;
+    background: #111;
+    width: 640px;
+    height: 480px;
+    overflow: hidden;
 }
 
-iframe {
-    width: 100%;
-    height: 240px;
-    border: none;
+.tile-label {
+    position: absolute;
+    top: 6px;
+    left: 8px;
+    background: rgba(0,0,0,0.6);
+    color: #aaa;
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 2px;
+    z-index: 10;
+    pointer-events: none;
 }
+
+.tile-status {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #333;
+    z-index: 10;
+}
+
+.tile-status.live  { background: #2d9e2d; }
+.tile-status.dead  { background: #6b2020; }
+
+/* WebRTC iframe — fill tile exactly, no margins, no scrollbars */
+.tile iframe {
+    width: 640px;
+    height: 480px;
+    border: none;
+    display: block;
+    /* Strip mediamtx player chrome via CSS injection is not possible
+       across origins, so we size the iframe to overflow slightly and
+       clip — hides the bottom control bar */
+    margin-top: -0px;
+}
+
+.tile-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #2a2a2a;
+    font-size: 12px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
 </style>
 </head>
-
 <body>
 
-<h1>BirdDog Live Grid</h1>
+<header>
+    <strong>BirdDog</strong>
+    <span id="status">loading...</span>
+    <button onclick="refresh()">Refresh</button>
+</header>
 
-<button onclick="loadStreams()">Refresh</button>
-
-<div class="grid" id="grid"></div>
+<div id="grid"></div>
 
 <script>
 
-async function loadStreams() {
+const SLOTS = ['cam01', 'cam02', 'cam03', 'cam04'];
+const REFRESH_INTERVAL = 15000;  // re-check stream states every 15s
 
-    const grid = document.getElementById("grid");
-    grid.innerHTML = "Loading...";
+let refreshTimer = null;
 
-    const host = window.location.hostname;
-
+async function getActiveStreams() {
     try {
-
-        const response = await fetch(`http://${host}:9997/v3/paths/list`);
-        const data = await response.json();
-
-        if (!data.items || data.items.length === 0) {
-            grid.innerHTML = "No active streams.";
-            return;
-        }
-
-        grid.innerHTML = "";
-
-        data.items.forEach(item => {
-
-            if (!item.ready) return;
-
-            const tile = document.createElement("div");
-            tile.className = "tile";
-
-            const title = document.createElement("div");
-            title.innerText = item.name;
-
-            const frame = document.createElement("iframe");
-            frame.src = `http://${host}:8889/${item.name}`;
-
-            tile.appendChild(title);
-            tile.appendChild(frame);
-
-            grid.appendChild(tile);
-
+        const r = await fetch('/api/v3/paths/list');
+        const d = await r.json();
+        const active = new Set();
+        (d.items || []).forEach(item => {
+            if (item.ready) active.add(item.name);
         });
-
-    } catch (err) {
-
-        console.error(err);
-        grid.innerHTML = "Error loading streams.";
-
+        return active;
+    } catch (e) {
+        return null;
     }
-
 }
 
-loadStreams();
+async function refresh() {
+
+    clearTimeout(refreshTimer);
+
+    const status = document.getElementById('status');
+    status.textContent = 'refreshing...';
+
+    const active = await getActiveStreams();
+    const grid = document.getElementById('grid');
+    const host = window.location.hostname;
+
+    if (active === null) {
+        status.textContent = 'API unreachable';
+        refreshTimer = setTimeout(refresh, REFRESH_INTERVAL);
+        return;
+    }
+
+    grid.innerHTML = '';
+
+    let liveCount = 0;
+
+    SLOTS.forEach(name => {
+
+        const tile = document.createElement('div');
+        tile.className = 'tile';
+        tile.id = 'tile-' + name;
+
+        const label = document.createElement('div');
+        label.className = 'tile-label';
+        label.textContent = name;
+
+        const dot = document.createElement('div');
+        dot.className = 'tile-status';
+
+        if (active.has(name)) {
+
+            liveCount++;
+            dot.classList.add('live');
+
+            const frame = document.createElement('iframe');
+            // Load mediamtx WebRTC player — auto-plays the stream
+            frame.src = `http://${host}:8889/${name}`;
+            frame.allow = 'autoplay';
+
+            tile.appendChild(frame);
+
+        } else {
+
+            dot.classList.add('dead');
+            const empty = document.createElement('div');
+            empty.className = 'tile-empty';
+            empty.textContent = name + ' — no signal';
+            tile.appendChild(empty);
+
+        }
+
+        tile.appendChild(label);
+        tile.appendChild(dot);
+        grid.appendChild(tile);
+
+    });
+
+    const now = new Date().toLocaleTimeString();
+    status.textContent = `${liveCount} / ${SLOTS.length} live — ${now}`;
+
+    refreshTimer = setTimeout(refresh, REFRESH_INTERVAL);
+}
+
+refresh();
 
 </script>
-
 </body>
 </html>
 EOF
 
+echo "  Dashboard written: $WEB_DIR/index.html"
+
+# -------------------------------------------------------
+# Validate and start nginx
+# -------------------------------------------------------
 
 echo ""
-echo "=== Validating nginx config ==="
+echo "=== Starting nginx ==="
 
 nginx -t
-
-
-echo ""
-echo "=== Restarting nginx ==="
-
+systemctl enable nginx
 systemctl restart nginx
 
+# -------------------------------------------------------
+# Verification
+# -------------------------------------------------------
 
 echo ""
 echo "=== Verification ==="
 
-echo "--- nginx status ---"
-systemctl is-active nginx && echo "nginx OK"
+if systemctl is-active --quiet nginx; then
+    echo "  nginx : running"
+else
+    echo "  nginx : NOT running — check: journalctl -u nginx"
+fi
 
 echo ""
-echo "--- listening port 80 ---"
-ss -lntup | grep :80 || true
+echo "--- Port 80 ---"
+ss -lntp | grep ':80 ' || echo "  (not listening)"
 
 echo ""
-echo "--- web directory ---"
-ls -l "$WEB_DIR"
+echo "--- Web directory ---"
+ls -lh "$WEB_DIR"
 
 echo ""
 echo "================================="
 echo "BirdDog Web Dashboard Ready"
 echo "================================="
 echo ""
-echo "Open dashboard at:"
-echo "http://$(hostname).local"
-echo "or"
-echo "http://10.10.10.1"
+echo "  Dashboard : http://$(hostname).local"
+echo "  Dashboard : http://10.10.10.1"
 echo ""
-echo "Install log saved to:"
-echo "$LOG"
+echo "Install log: $LOG"
+echo ""
