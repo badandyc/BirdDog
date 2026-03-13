@@ -10,8 +10,6 @@ BIRDDOG_ROOT="/opt/birddog"
 LOG="$BIRDDOG_ROOT/oobe_reset.log"
 mkdir -p "$BIRDDOG_ROOT"
 
-# Operator sees clean output on stdout
-# Full trace goes to log file only
 exec > >(tee -a "$LOG") 2>&1
 
 echo "====================================="
@@ -47,8 +45,8 @@ svc_stop_disable() {
         systemctl is-active "$SVC" >/dev/null 2>&1 \
             && { systemctl stop "$SVC"; echo "  stopped  $SVC"; } \
             || echo "  already stopped  $SVC"
-        systemctl is-enabled "$SVC" >/dev/null 2>&1 \
-            && { systemctl disable "$SVC"; echo "  disabled $SVC"; } \
+        systemctl disable "$SVC" 2>/dev/null \
+            && echo "  disabled $SVC" \
             || echo "  already disabled $SVC"
     else
         echo "  not present  $SVC"
@@ -67,6 +65,7 @@ remove_path() {
 
 # -------------------------------------------------------
 # Step 1 — Stop and disable BirdDog services
+# Disable BEFORE removing unit files so symlinks are cleaned
 # -------------------------------------------------------
 
 step "Stopping BirdDog services"
@@ -86,6 +85,12 @@ step "Removing runtime scripts"
 
 remove_path /usr/local/bin/birddog-mesh-join.sh
 remove_path /usr/local/bin/birddog-stream.sh
+
+# Remove unit files and any lingering wants symlinks
+for SVC in birddog-mesh birddog-stream mediamtx; do
+    rm -f "/etc/systemd/system/${SVC}.service"
+    rm -f "/etc/systemd/system/multi-user.target.wants/${SVC}.service"
+done
 
 # -------------------------------------------------------
 # Step 3 — Clear runtime state
@@ -132,7 +137,6 @@ remove_path /etc/systemd/network
 
 # -------------------------------------------------------
 # Step 5 — Reset hostname
-# Write /etc/hostname and /etc/hosts before hostnamectl
 # -------------------------------------------------------
 
 step "Resetting hostname"
@@ -141,7 +145,7 @@ OLD_HOST=$(hostname)
 echo "birddog" > /etc/hostname
 hostnamectl set-hostname birddog
 
-cat > /etc/hosts << 'EOF'
+cat > /etc/hosts <<'EOF'
 127.0.0.1 localhost
 127.0.1.1 birddog
 
@@ -164,8 +168,6 @@ echo "  avahi restarted"
 
 # -------------------------------------------------------
 # Step 7 — Bring radio interfaces to clean baseline
-# udev handles naming — just bring USB radios down cleanly
-# wlan0 (onboard) stays blocked as per golden image config
 # -------------------------------------------------------
 
 step "Resetting radio interfaces"
@@ -212,7 +214,7 @@ done
 echo ""
 echo "  Services:"
 for SVC in birddog-mesh birddog-stream mediamtx hostapd dnsmasq nginx; do
-    STATE=$(systemctl is-enabled "${SVC}.service" 2>/dev/null || echo "not-installed")
+    STATE=$(systemctl is-enabled "${SVC}.service" 2>/dev/null || echo "not-found")
     echo "    ${SVC}  →  $STATE"
 done
 
