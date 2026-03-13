@@ -124,4 +124,73 @@ echo "Deterministic radio layout will apply at next reboot."
 echo ""
 echo "-------------------------------------"
 echo "Phase 5 — Role Installer"
-echo "-------------------------
+echo "-------------------------------------"
+
+if [[ "$ROLE" == "bdc" ]]; then
+
+    if [[ "$REUSE_ALL" == "1" ]]; then
+        echo ""
+        echo "[BDC] Reusing existing configuration..."
+    else
+
+        while true
+        do
+            read -r -p "Enter BDM hostname (without .local): " BDM_NAME
+
+            [[ -z "$BDM_NAME" ]] && continue
+
+            if [[ "$BDM_NAME" =~ ^bdm-[0-9]{2}$ ]]; then
+                break
+            fi
+
+            echo "Invalid BDM hostname format"
+        done
+
+        BDM_HOST="${BDM_NAME}.local"
+    fi
+
+    echo ""
+    echo "[BDC] Running installer..."
+
+    bash /opt/birddog/bdc/bdc_fresh_install_setup.sh \
+        "$HOSTNAME_INPUT" \
+        "$BDM_HOST" \
+        "$STREAM_NAME"
+
+elif [[ "$ROLE" == "bdm" ]]; then
+
+    echo ""
+    echo "[BDM] Running installer..."
+
+    bash /opt/birddog/bdm/bdm_initial_setup.sh "$HOSTNAME_INPUT"
+    bash /opt/birddog/bdm/bdm_AP_setup.sh
+    bash /opt/birddog/bdm/bdm_mediamtx_setup.sh
+    bash /opt/birddog/bdm/bdm_web_setup.sh
+
+else
+    echo "Unknown role"
+    exit 1
+fi
+
+echo ""
+echo "-------------------------------------"
+echo "Phase 6 — Mesh Installation"
+echo "-------------------------------------"
+
+bash /opt/birddog/mesh/add_mesh_network.sh "$HOSTNAME_INPUT"
+
+echo "Waiting for mesh service..."
+sleep 3
+
+if ! systemctl is-active --quiet birddog-mesh.service; then
+    echo "ERROR: Mesh service failed to start"
+    exit 1
+fi
+
+echo ""
+echo "====================================="
+echo "Device configuration complete."
+echo "====================================="
+echo ""
+echo "Recommended: reboot node now (radio mapping will apply)"
+echo ""
