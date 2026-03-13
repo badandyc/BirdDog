@@ -286,7 +286,7 @@ chmod +x /usr/local/bin/birddog-mesh-join.sh
 cat > /etc/systemd/system/birddog-mesh.service << EOF
 [Unit]
 Description=BirdDog Mesh Runtime
-After=network-online.target birddog-radio-map.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
