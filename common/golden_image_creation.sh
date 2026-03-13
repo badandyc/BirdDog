@@ -2,327 +2,270 @@
 set -e
 set -o pipefail
 
+mkdir -p /opt/birddog
+
+LOG="/opt/birddog/install_ap.log"
+exec > >(tee -a "$LOG") 2>&1
+
+echo "================================="
+echo "BirdDog AP Setup"
+echo "================================="
+date
+
 if [[ "$EUID" -ne 0 ]]; then
-    exec sudo -E bash "$0" "$@"
-fi
-
-echo "====================================="
-echo "BirdDog Golden Image Creation"
-echo "====================================="
-echo ""
-
-# --------------------------------------------------
-# INSTALL MODE
-# --------------------------------------------------
-
-if [[ -z "$BIRDDOG_MODE" ]]; then
-    echo "Select install mode:"
-    echo ""
-    echo "[F] Full install"
-    echo "[R] Refresh (scripts only)"
-    echo ""
-    read -r -p "Choice: " MODE
-
-    case "$MODE" in
-        F|f) BIRDDOG_MODE="full" ;;
-        R|r) BIRDDOG_MODE="refresh" ;;
-        *) echo "Invalid selection"; exit 1 ;;
-    esac
-fi
-
-echo "Mode: $BIRDDOG_MODE"
-echo ""
-
-BIRDDOG_ROOT="/opt/birddog"
-VERSION_DIR="$BIRDDOG_ROOT/version"
-COMMIT_FILE="$VERSION_DIR/COMMIT"
-VERSION_FILE="$VERSION_DIR/VERSION"
-BUILD_FILE="$VERSION_DIR/BUILD"
-
-mkdir -p "$BIRDDOG_ROOT"/{bdm,bdc,mesh,common,mediamtx,web,logs,version}
-
-# --------------------------------------------------
-# FULL INSTALL ONLY
-# --------------------------------------------------
-
-if [[ "$BIRDDOG_MODE" == "full" ]]; then
-
-    echo "[Phase 0] Updating package index"
-    apt update || true
-
-    echo ""
-    echo "[Phase 1] Package Assurance"
-
-    for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar iw wireless-tools; do
-        if dpkg -s "$pkg" >/dev/null 2>&1; then
-            echo "  OK       $pkg"
-        else
-            echo "  INSTALL  $pkg"
-            apt install -y "$pkg"
-        fi
-    done
-
-    echo ""
-    echo "[Phase 1.5] Installing MediaMTX"
-
-    MEDIAMTX_DIR="$BIRDDOG_ROOT/mediamtx"
-    MEDIAMTX_STAGE="/tmp/mediamtx_stage"
-    MEDIAMTX_TAR="/tmp/mediamtx.tar.gz"
-    MEDIAMTX_VERSION="v1.16.3"
-
-    # Pi 3B running 64-bit Pi OS (aarch64)
-    MEDIAMTX_URL="https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_arm64.tar.gz"
-
-    mkdir -p "$MEDIAMTX_DIR"
-
-    if [[ -f "$MEDIAMTX_DIR/mediamtx" ]]; then
-        echo "  MediaMTX already present — skipping download"
-    else
-        echo "  Downloading MediaMTX $MEDIAMTX_VERSION (linux_arm7)..."
-
-        curl --connect-timeout 30 --retry 3 --retry-delay 5 -fL \
-            "$MEDIAMTX_URL" -o "$MEDIAMTX_TAR"
-
-        rm -rf "$MEDIAMTX_STAGE"
-        mkdir -p "$MEDIAMTX_STAGE"
-
-        tar -xzf "$MEDIAMTX_TAR" -C "$MEDIAMTX_STAGE"
-
-        BIN=$(find "$MEDIAMTX_STAGE" -name mediamtx -type f | head -1)
-
-        if [[ -z "$BIN" ]]; then
-            echo "ERROR: MediaMTX binary not found in archive"
-            exit 1
-        fi
-
-        rm -rf "$MEDIAMTX_DIR"/*
-        mv "$BIN" "$MEDIAMTX_DIR/mediamtx"
-        chmod +x "$MEDIAMTX_DIR/mediamtx"
-
-        rm -rf "$MEDIAMTX_STAGE"
-        rm -f "$MEDIAMTX_TAR"
-
-        echo "  MediaMTX installed at $MEDIAMTX_DIR/mediamtx"
-    fi
-
-fi
-
-# --------------------------------------------------
-# COMMIT STATE
-# --------------------------------------------------
-
-echo ""
-echo "[Phase 2] Commit State Check"
-
-REMOTE_COMMIT=$(git ls-remote https://github.com/badandyc/BirdDog HEAD | cut -c1-7)
-
-if [[ -z "$REMOTE_COMMIT" ]]; then
-    echo "ERROR: Could not resolve remote commit — check network connectivity"
+    echo "Run as root: sudo bash /opt/birddog/bdm/bdm_AP_setup.sh"
     exit 1
 fi
 
-LOCAL_COMMIT="none"
-[[ -f "$COMMIT_FILE" ]] && LOCAL_COMMIT=$(cat "$COMMIT_FILE")
+AP_IF="wlan2"
+AP_IP="10.10.10.1/24"
+SSID="BirdDog"
+PASSPHRASE="StrongPass123"
 
-echo "  Remote : $REMOTE_COMMIT"
-echo "  Local  : $LOCAL_COMMIT"
+# -------------------------------------------------------
+# Phase 1 — Write all network config files FIRST
+# before touching any running services.
+# This keeps eth0 / SSH alive during the transition.
+# -------------------------------------------------------
 
-if [[ "$REMOTE_COMMIT" == "$LOCAL_COMMIT" ]]; then
-    echo "  State  : Already at latest commit"
+echo ""
+echo "=== Writing network configuration ==="
+
+mkdir -p /etc/systemd/network
+
+# eth0 — DHCP, management interface (SSH lives here)
+cat > /etc/systemd/network/10-eth0.network << EOF
+[Match]
+Name=eth0
+
+[Network]
+DHCP=yes
+EOF
+
+# wlan1 — mesh backbone, managed by birddog-mesh.service
+# networkd should not touch it — unmanaged here
+cat > /etc/systemd/network/20-wlan1.network << EOF
+[Match]
+Name=wlan1
+
+[Network]
+DHCP=no
+LinkLocalAddressing=no
+EOF
+
+# wlan2 — AP interface, static IP
+cat > /etc/systemd/network/30-wlan2.network << EOF
+[Match]
+Name=${AP_IF}
+
+[Network]
+Address=${AP_IP}
+ConfigureWithoutCarrier=yes
+LinkLocalAddressing=no
+EOF
+
+echo "  Network config files written"
+
+# -------------------------------------------------------
+# Phase 2 — Regulatory + rfkill
+# -------------------------------------------------------
+
+echo ""
+echo "=== Radio regulatory + rfkill ==="
+
+rfkill unblock wifi || true
+iw reg set US || true
+echo "  Regulatory domain: US"
+
+# -------------------------------------------------------
+# Phase 3 — Transition NetworkManager → systemd-networkd
+# Write config first, then switch — minimises eth0 downtime
+# -------------------------------------------------------
+
+echo ""
+echo "=== Transitioning to systemd-networkd ==="
+
+# Enable networkd before stopping NM so there's minimal gap
+systemctl enable systemd-networkd
+systemctl start systemd-networkd
+
+# Now stop NetworkManager — eth0 will briefly lose its address
+# then networkd will re-acquire via DHCP
+if systemctl is-active --quiet NetworkManager 2>/dev/null; then
+    echo "  Stopping NetworkManager..."
+    systemctl stop NetworkManager || true
+fi
+systemctl disable NetworkManager 2>/dev/null || true
+
+# Trigger networkd to pick up eth0 immediately
+networkctl reload 2>/dev/null || true
+networkctl reconfigure eth0 2>/dev/null || true
+
+echo "  systemd-networkd active"
+echo "  NOTE: eth0 DHCP re-acquiring — SSH may briefly drop and reconnect"
+
+# -------------------------------------------------------
+# Phase 4 — Configure wlan2 for AP mode
+# At this point in first-run flow the radio mapping hasn't
+# run yet (that's post-reboot), so wlan2 may not exist by
+# name. We attempt setup but don't block on it.
+# -------------------------------------------------------
+
+echo ""
+echo "=== Configuring AP interface (${AP_IF}) ==="
+
+if ip link show "${AP_IF}" >/dev/null 2>&1; then
+    ip link set "${AP_IF}" down || true
+    sleep 1
+    iw dev "${AP_IF}" set type managed || true
+    iw dev "${AP_IF}" set power_save off || true
+    sleep 1
+    ip link set "${AP_IF}" up || true
+    echo "  ${AP_IF} configured"
 else
-    echo "  State  : Advancing $LOCAL_COMMIT → $REMOTE_COMMIT"
+    echo "  ${AP_IF} not present yet — will be available after reboot"
+    echo "  (radio mapping assigns wlan2 to Edimax adapter at boot)"
 fi
 
-# --------------------------------------------------
-# FETCH SCRIPTS
-# --------------------------------------------------
+# -------------------------------------------------------
+# Phase 5 — hostapd
+# -------------------------------------------------------
 
 echo ""
-echo "[Phase 3] Fetch Scripts"
+echo "=== Configuring hostapd ==="
 
-FETCH_FAILED=0
+mkdir -p /etc/hostapd
 
-fetch_file() {
-    local SRC="$1"
-    local DEST="$2"
-    local TMP="/tmp/birddog_fetch.$$"
+cat > /etc/hostapd/hostapd.conf << EOF
+interface=${AP_IF}
+driver=nl80211
+ssid=${SSID}
+hw_mode=g
+channel=6
+country_code=US
+ieee80211n=1
+wmm_enabled=1
+auth_algs=1
 
-    if ! curl --connect-timeout 10 --retry 3 --retry-delay 2 -fsSL \
-        "https://raw.githubusercontent.com/badandyc/BirdDog/${REMOTE_COMMIT}/${SRC}" \
-        -o "$TMP"; then
-        echo "  FAILED   $SRC"
-        FETCH_FAILED=1
-        rm -f "$TMP"
-        return
-    fi
+wpa=2
+wpa_passphrase=${PASSPHRASE}
+wpa_key_mgmt=WPA-PSK
+rsn_pairwise=CCMP
+EOF
 
-    if [[ ! -f "$DEST" ]]; then
-        echo "  NEW      $SRC"
-        install -m 0755 "$TMP" "$DEST"
-    elif cmp -s "$TMP" "$DEST"; then
-        echo "  UNCHANGED $SRC"
-        rm -f "$TMP"
-    else
-        echo "  UPDATED  $SRC"
-        install -m 0755 "$TMP" "$DEST"
-    fi
-}
+echo "  hostapd.conf written"
 
-fetch_file common/golden_image_creation.sh  "$BIRDDOG_ROOT/common/golden_image_creation.sh"
-fetch_file common/script_update.sh          "$BIRDDOG_ROOT/common/script_update.sh"
-fetch_file common/device_configure.sh       "$BIRDDOG_ROOT/common/device_configure.sh"
-fetch_file common/radio_map_setup.sh        "$BIRDDOG_ROOT/common/radio_map_setup.sh"
-fetch_file common/oobe_reset.sh             "$BIRDDOG_ROOT/common/oobe_reset.sh"
-fetch_file common/verify_node.sh            "$BIRDDOG_ROOT/common/verify_node.sh"
-fetch_file bdm/bdm_initial_setup.sh         "$BIRDDOG_ROOT/bdm/bdm_initial_setup.sh"
-fetch_file bdm/bdm_AP_setup.sh              "$BIRDDOG_ROOT/bdm/bdm_AP_setup.sh"
-fetch_file bdm/bdm_mediamtx_setup.sh        "$BIRDDOG_ROOT/bdm/bdm_mediamtx_setup.sh"
-fetch_file bdm/bdm_web_setup.sh             "$BIRDDOG_ROOT/bdm/bdm_web_setup.sh"
-fetch_file bdc/bdc_fresh_install_setup.sh   "$BIRDDOG_ROOT/bdc/bdc_fresh_install_setup.sh"
-fetch_file mesh/add_mesh_network.sh         "$BIRDDOG_ROOT/mesh/add_mesh_network.sh"
-
-if [[ "$FETCH_FAILED" -eq 1 ]]; then
-    echo ""
-    echo "ERROR: One or more scripts failed to fetch — aborting"
-    echo "       Platform identity not updated"
-    exit 1
+# Point /etc/default/hostapd at our config (legacy path, belt+suspenders)
+if grep -q "^DAEMON_CONF=" /etc/default/hostapd 2>/dev/null; then
+    sed -i 's|^DAEMON_CONF=.*|DAEMON_CONF="/etc/hostapd/hostapd.conf"|' /etc/default/hostapd
+else
+    echo 'DAEMON_CONF="/etc/hostapd/hostapd.conf"' >> /etc/default/hostapd
 fi
 
-# --------------------------------------------------
-# PERMISSIONS
-# --------------------------------------------------
+# Single drop-in: ordering + rfkill unblock before start
+mkdir -p /etc/systemd/system/hostapd.service.d
+
+cat > /etc/systemd/system/hostapd.service.d/birddog.conf << EOF
+[Unit]
+After=systemd-networkd.service birddog-radio-map.service
+
+[Service]
+ExecStartPre=/usr/sbin/rfkill unblock wifi
+EOF
+
+# unmask MUST come before enable — Pi OS ships hostapd masked
+systemctl unmask hostapd
+systemctl enable hostapd
+echo "  hostapd enabled"
+
+# -------------------------------------------------------
+# Phase 6 — dnsmasq
+# -------------------------------------------------------
 
 echo ""
-echo "[Phase 4] Permissions"
+echo "=== Configuring dnsmasq ==="
 
-chmod +x "$BIRDDOG_ROOT"/common/*.sh
-chmod +x "$BIRDDOG_ROOT"/bdm/*.sh
-chmod +x "$BIRDDOG_ROOT"/bdc/*.sh
-chmod +x "$BIRDDOG_ROOT"/mesh/*.sh
+systemctl stop dnsmasq 2>/dev/null || true
+rm -f /etc/dnsmasq.conf
 
-# --------------------------------------------------
-# WRITE VERSION IDENTITY
-# --------------------------------------------------
+cat > /etc/dnsmasq.conf << EOF
+# BirdDog AP DHCP server
+interface=${AP_IF}
+bind-dynamic
+dhcp-range=10.10.10.50,10.10.10.150,255.255.255.0,24h
+EOF
 
-echo "$REMOTE_COMMIT"                       > "$COMMIT_FILE"
-echo "commit-$REMOTE_COMMIT"                > "$VERSION_FILE"
-date -u +"%Y-%m-%dT%H:%M:%SZ"              > "$BUILD_FILE"
+systemctl enable dnsmasq
+echo "  dnsmasq enabled"
+
+# -------------------------------------------------------
+# Phase 7 — Reload and start services
+# -------------------------------------------------------
 
 echo ""
-echo "[Phase 5] Installing BirdDog CLI"
+echo "=== Starting AP services ==="
 
-cat > /usr/local/bin/birddog << 'BIRDDOG_CLI'
-#!/bin/bash
-set -e
+systemctl daemon-reload
 
-BIRDDOG_ROOT="/opt/birddog"
+# Only attempt to start if interface exists (post-reboot it will)
+if ip link show "${AP_IF}" >/dev/null 2>&1; then
 
-show_help() {
-echo ""
-echo "================================="
-echo "         BirdDog CLI"
-echo "================================="
-echo ""
-echo "System:"
-echo "  birddog install      Full or refresh golden image"
-echo "  birddog update       Fetch latest scripts from repo"
-echo "  birddog configure    Configure node role (BDC / BDM)"
-echo "  birddog reset        Wipe node config (OOBE)"
-echo ""
-echo "Verification:"
-echo "  birddog verify       Full node health check"
-echo "  birddog status       Platform version + commit state"
-echo "  birddog radios       Show current radio layout"
-echo ""
-echo "Operations:"
-echo "  birddog restart      Restart BirdDog services"
-echo ""
-echo "================================="
-echo ""
-}
-
-case "$1" in
-
-install)
-    sudo bash "$BIRDDOG_ROOT/common/golden_image_creation.sh"
-    ;;
-
-update)
-    sudo bash "$BIRDDOG_ROOT/common/script_update.sh"
-    ;;
-
-configure)
-    sudo bash "$BIRDDOG_ROOT/common/device_configure.sh"
-    ;;
-
-reset)
-    sudo bash "$BIRDDOG_ROOT/common/oobe_reset.sh"
-    ;;
-
-verify)
-    sudo bash "$BIRDDOG_ROOT/common/verify_node.sh"
-    ;;
-
-status)
-    echo ""
-    echo "Version : $(cat $BIRDDOG_ROOT/version/VERSION 2>/dev/null || echo unknown)"
-    echo "Commit  : $(cat $BIRDDOG_ROOT/version/COMMIT  2>/dev/null || echo unknown)"
-    echo "Built   : $(cat $BIRDDOG_ROOT/version/BUILD   2>/dev/null || echo unknown)"
-    echo ""
-    REMOTE=$(git ls-remote https://github.com/badandyc/BirdDog HEAD 2>/dev/null | cut -c1-7 || echo "unreachable")
-    LOCAL=$(cat $BIRDDOG_ROOT/version/COMMIT 2>/dev/null || echo none)
-    if [[ "$REMOTE" == "$LOCAL" ]]; then
-        echo "Repo    : up to date ($LOCAL)"
-    else
-        echo "Repo    : update available ($LOCAL → $REMOTE)"
-    fi
-    echo ""
-    ;;
-
-radios)
-    echo ""
-    echo "Radio layout:"
-    for IF in wlan0 wlan1 wlan2; do
-        if ip link show "$IF" >/dev/null 2>&1; then
-            DRIVER=$(ethtool -i "$IF" 2>/dev/null | awk '/driver:/{print $2}')
-            MODE=$(iw dev "$IF" info 2>/dev/null | awk '/type/{print $2}')
-            STATE=$(ip link show "$IF" | awk '/state/{print $9}')
-            echo "  $IF  driver=$DRIVER  mode=$MODE  state=$STATE"
-        else
-            echo "  $IF  not present"
-        fi
+    for i in 1 2 3; do
+        systemctl restart hostapd && break
+        echo "  hostapd retry $i..."
+        sleep 3
     done
+
+    for i in 1 2 3; do
+        systemctl restart dnsmasq && break
+        echo "  dnsmasq retry $i..."
+        sleep 3
+    done
+
+else
+    echo "  ${AP_IF} not present — services will start automatically after reboot"
+fi
+
+# -------------------------------------------------------
+# Verification
+# -------------------------------------------------------
+
+echo ""
+echo "=== Verification ==="
+
+echo "--- networkd managed interfaces ---"
+networkctl list 2>/dev/null || true
+
+echo ""
+echo "--- eth0 address ---"
+ip addr show eth0 | grep "inet " || echo "  eth0: no address yet (DHCP re-acquiring)"
+
+if ip link show "${AP_IF}" >/dev/null 2>&1; then
     echo ""
-    ;;
+    echo "--- ${AP_IF} address ---"
+    ip addr show "${AP_IF}" | grep "inet " || echo "  ${AP_IF}: no address yet"
 
-restart)
-    echo "Restarting BirdDog services..."
-    sudo systemctl restart birddog-mesh.service  2>/dev/null && echo "  birddog-mesh  restarted" || echo "  birddog-mesh  not installed"
-    sudo systemctl restart mediamtx.service      2>/dev/null && echo "  mediamtx      restarted" || echo "  mediamtx      not installed"
-    sudo systemctl restart birddog-stream.service 2>/dev/null && echo "  birddog-stream restarted" || echo "  birddog-stream not installed"
-    sudo systemctl restart nginx.service         2>/dev/null && echo "  nginx         restarted" || echo "  nginx         not installed"
     echo ""
-    ;;
+    echo "--- hostapd ---"
+    systemctl is-active hostapd && echo "  hostapd: OK" || echo "  hostapd: not running"
 
-*)
-    show_help
-    ;;
-
-esac
-BIRDDOG_CLI
-
-chmod +x /usr/local/bin/birddog
-
-# --------------------------------------------------
+    echo ""
+    echo "--- dnsmasq ---"
+    systemctl is-active dnsmasq && echo "  dnsmasq: OK" || echo "  dnsmasq: not running"
+fi
 
 echo ""
-echo "[Phase 6] Finalization"
+echo "================================="
+echo "BirdDog AP Setup Complete"
+echo "================================="
 echo ""
-echo "====================================="
-echo "Golden image creation complete"
-echo "  Commit : $REMOTE_COMMIT"
-echo "  Mode   : $BIRDDOG_MODE"
-echo "====================================="
+echo "Interface layout:"
+echo "  eth0  → DHCP (management / SSH)"
+echo "  wlan1 → mesh backbone"
+echo "  wlan2 → AP ${AP_IP} (SSID: ${SSID})"
 echo ""
-echo "Next step: birddog configure"
+echo "AP clients: 10.10.10.50 – 10.10.10.150"
+echo "Dashboard : http://10.10.10.1"
+echo ""
+echo "Install log: $LOG"
 echo ""
