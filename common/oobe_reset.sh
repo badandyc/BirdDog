@@ -2,82 +2,74 @@
 set -e
 set -o pipefail
 
-mkdir -p /opt/birddog
+if [[ "$EUID" -ne 0 ]]; then
+    exec sudo -E bash /opt/birddog/common/oobe_reset.sh "$@"
+fi
 
-LOG="/opt/birddog/oobe_reset.log"
+BIRDDOG_ROOT="/opt/birddog"
+LOG="$BIRDDOG_ROOT/oobe_reset.log"
+mkdir -p "$BIRDDOG_ROOT"
 
-# Operator output = stdout
-# Full gritty trace = logfile (fd 3)
-exec 3>>"$LOG"
-BASH_XTRACEFD=3
-set -x
+# Operator sees clean output on stdout
+# Full trace goes to log file only
+exec > >(tee -a "$LOG") 2>&1
 
 echo "====================================="
 echo "BirdDog Field Reset (OOBE)"
 echo "====================================="
-date | tee /dev/fd/3
-
-if [[ "$EUID" -ne 0 ]]; then
-    echo "Run as root: sudo bash /opt/birddog/common/oobe_reset.sh"
-    exit 1
-fi
+date
 
 echo ""
 echo "WARNING:"
-echo "This will wipe BirdDog node configuration."
-echo "Golden installer baseline will be preserved."
+echo "  This wipes all BirdDog node configuration."
+echo "  Scripts and binaries are preserved."
+echo "  Node will need birddog configure to become operational."
 echo ""
 
 read -r -p "Type RESET to continue: " CONFIRM
 
 if [[ "$CONFIRM" != "RESET" ]]; then
     echo "Aborted."
-    exit 1
+    exit 0
 fi
 
-step() {
-    echo ""
-    echo "• $1"
-}
+echo ""
+
+# -------------------------------------------------------
+# Helpers
+# -------------------------------------------------------
+
+step() { echo ""; echo "• $1"; }
 
 svc_stop_disable() {
-
-    SVC="$1"
-
-    if systemctl list-unit-files | grep -q "^$SVC"; then
-
-        if systemctl is-active "$SVC" >/dev/null 2>&1; then
-            echo "   stopping $SVC"
-            systemctl stop "$SVC"
-        else
-            echo "   $SVC already stopped"
-        fi
-
-        if systemctl is-enabled "$SVC" >/dev/null 2>&1; then
-            echo "   disabling $SVC"
-            systemctl disable "$SVC"
-        else
-            echo "   $SVC already disabled"
-        fi
-
+    local SVC="$1"
+    if systemctl list-unit-files 2>/dev/null | grep -q "^${SVC}"; then
+        systemctl is-active "$SVC" >/dev/null 2>&1 \
+            && { systemctl stop "$SVC"; echo "  stopped  $SVC"; } \
+            || echo "  already stopped  $SVC"
+        systemctl is-enabled "$SVC" >/dev/null 2>&1 \
+            && { systemctl disable "$SVC"; echo "  disabled $SVC"; } \
+            || echo "  already disabled $SVC"
     else
-        echo "   $SVC not present"
+        echo "  not present  $SVC"
     fi
 }
 
 remove_path() {
-
-    TARGET="$1"
-
+    local TARGET="$1"
     if [[ -e "$TARGET" ]]; then
-        echo "   removing $TARGET"
         rm -rf "$TARGET"
+        echo "  removed  $TARGET"
     else
-        echo "   $TARGET already clean"
+        echo "  clean    $TARGET"
     fi
 }
 
-step "Stopping and disabling BirdDog services"
+# -------------------------------------------------------
+# Step 1 — Stop and disable BirdDog services
+# -------------------------------------------------------
+
+step "Stopping BirdDog services"
 
 svc_stop_disable birddog-mesh.service
 svc_stop_disable birddog-stream.service
@@ -86,61 +78,70 @@ svc_stop_disable hostapd.service
 svc_stop_disable dnsmasq.service
 svc_stop_disable nginx.service
 
-step "Removing runtime helper scripts"
+# -------------------------------------------------------
+# Step 2 — Remove runtime scripts
+# -------------------------------------------------------
+
+step "Removing runtime scripts"
 
 remove_path /usr/local/bin/birddog-mesh-join.sh
 remove_path /usr/local/bin/birddog-stream.sh
 
+# -------------------------------------------------------
+# Step 3 — Clear runtime state
+# Preserve: scripts, mediamtx binary, version info, birddog CLI
+# -------------------------------------------------------
+
 step "Clearing runtime state"
 
-remove_path /opt/birddog/logs
-remove_path /opt/birddog/radio
-remove_path /opt/birddog/web
-remove_path /opt/birddog/bdc/bdc.conf
+remove_path "$BIRDDOG_ROOT/logs"
+remove_path "$BIRDDOG_ROOT/web"
+remove_path "$BIRDDOG_ROOT/bdc/bdc.conf"
 
-echo "   cleaning mesh runtime (preserving lifecycle)"
-
-MESH_DIR="/opt/birddog/mesh"
-PRESERVE="$MESH_DIR/add_mesh_network.sh"
-
-if [[ -d "$MESH_DIR" ]]; then
-
-    if [[ -f "$PRESERVE" ]]; then
-        echo "   preserving add_mesh_network.sh"
-    fi
-
-    find "$MESH_DIR" -mindepth 1 ! -path "$PRESERVE" -exec rm -rf {} +
-
-else
-    echo "   mesh directory not present"
+# Clear mesh runtime logs but preserve the installer script
+if [[ -d "$BIRDDOG_ROOT/mesh" ]]; then
+    find "$BIRDDOG_ROOT/mesh" -mindepth 1 \
+        ! -name "add_mesh_network.sh" \
+        -exec rm -rf {} + 2>/dev/null || true
+    echo "  mesh runtime cleared (installer preserved)"
 fi
 
-mkdir -p /opt/birddog/logs
-mkdir -p /opt/birddog/mesh
-mkdir -p /opt/birddog/radio
-mkdir -p /opt/birddog/web
+# Recreate empty dirs
+mkdir -p "$BIRDDOG_ROOT"/{logs,web,mesh}
 
-step "Cleaning hostapd role config (preserve package directory)"
+# -------------------------------------------------------
+# Step 4 — Clear role-specific config
+# -------------------------------------------------------
 
+step "Clearing role configuration"
+
+# hostapd config (preserve package dir itself)
 if [[ -d /etc/hostapd ]]; then
     rm -f /etc/hostapd/*.conf 2>/dev/null || true
-    rm -f /etc/hostapd/hostapd.accept 2>/dev/null || true
-    rm -f /etc/hostapd/hostapd.deny 2>/dev/null || true
-    echo "   hostapd role config cleared"
-else
-    echo "   /etc/hostapd not present"
+    echo "  hostapd config cleared"
 fi
+
+# hostapd systemd drop-in
+remove_path /etc/systemd/system/hostapd.service.d
+
+# dnsmasq config
+remove_path /etc/dnsmasq.conf
+
+# networkd config (written by AP setup)
+remove_path /etc/systemd/network
+
+# -------------------------------------------------------
+# Step 5 — Reset hostname
+# Write /etc/hostname and /etc/hosts before hostnamectl
+# -------------------------------------------------------
 
 step "Resetting hostname"
 
 OLD_HOST=$(hostname)
+echo "birddog" > /etc/hostname
 hostnamectl set-hostname birddog
-hostname birddog
-echo "   $OLD_HOST → $(hostname)"
 
-step "Rewriting hosts table"
-
-cat <<EOF > /etc/hosts
+cat > /etc/hosts << 'EOF'
 127.0.0.1 localhost
 127.0.1.1 birddog
 
@@ -149,90 +150,78 @@ ff02::1 ip6-allnodes
 ff02::2 ip6-allrouters
 EOF
 
-step "Removing network configuration"
+echo "  $OLD_HOST → birddog"
 
-remove_path /etc/systemd/network
-remove_path /etc/dnsmasq.conf
-remove_path /etc/systemd/system/hostapd.service.d
+# -------------------------------------------------------
+# Step 6 — Restart avahi with clean state
+# -------------------------------------------------------
 
-step "Reloading systemd"
-
-systemctl daemon-reload
-
-step "Normalizing radio modes"
-
-for IFACE in wlan0 wlan1 wlan2; do
-    if ip link show "$IFACE" >/dev/null 2>&1; then
-        echo "   normalizing $IFACE"
-        ip link set "$IFACE" down || true
-        iw dev "$IFACE" set type managed || true
-    else
-        echo "   $IFACE not present"
-    fi
-done
-
-# FULL RADIO STATE → LOG ONLY
-iw dev >&3 2>&1 || true
-
-step "Restarting Avahi clean"
+step "Restarting avahi"
 
 rm -rf /var/lib/avahi-daemon/* 2>/dev/null || true
 systemctl restart avahi-daemon
+echo "  avahi restarted"
 
-step "Verification snapshot"
+# -------------------------------------------------------
+# Step 7 — Bring radio interfaces to clean baseline
+# udev handles naming — just bring USB radios down cleanly
+# wlan0 (onboard) stays blocked as per golden image config
+# -------------------------------------------------------
 
-echo "Hostname: $(hostname)"
+step "Resetting radio interfaces"
+
+for IFACE in wlan1 wlan2; do
+    if ip link show "$IFACE" >/dev/null 2>&1; then
+        ip link set "$IFACE" down 2>/dev/null || true
+        iw dev "$IFACE" set type managed 2>/dev/null || true
+        echo "  $IFACE → down (managed)"
+    else
+        echo "  $IFACE → not present"
+    fi
+done
+
+# -------------------------------------------------------
+# Step 8 — Reload systemd
+# -------------------------------------------------------
+
+step "Reloading systemd"
+systemctl daemon-reload
+echo "  done"
+
+# -------------------------------------------------------
+# Verification snapshot
+# -------------------------------------------------------
+
+step "Reset verification"
+
 echo ""
+echo "  Hostname : $(hostname)"
 
-echo "Radio Summary:"
+echo ""
+echo "  Radios:"
 for IFACE in wlan0 wlan1 wlan2; do
     if ip link show "$IFACE" >/dev/null 2>&1; then
-        MODE=$(iw dev "$IFACE" info 2>/dev/null | awk '/type/ {print $2}')
-        MAC=$(cat /sys/class/net/$IFACE/address 2>/dev/null)
-        echo "   $IFACE → present | mode=$MODE | mac=$MAC"
+        DRIVER=$(ethtool -i "$IFACE" 2>/dev/null | awk '/driver:/{print $2}')
+        STATE=$(ip link show "$IFACE" | awk '/state/{print $9}')
+        echo "    $IFACE  driver=$DRIVER  state=$STATE"
     else
-        echo "   $IFACE → not present"
+        echo "    $IFACE  not present"
     fi
 done
 
 echo ""
-echo "BirdDog Services:"
-
-svc_state() {
-
-    SVC="$1"
-
-    if ! systemctl list-unit-files | grep -q "^$SVC"; then
-        echo "   $SVC → not installed"
-        return
-    fi
-
-    STATE=$(systemctl is-enabled "$SVC" 2>/dev/null || true)
-
-    case "$STATE" in
-        enabled)  echo "   $SVC → enabled" ;;
-        disabled) echo "   $SVC → disabled" ;;
-        masked)   echo "   $SVC → masked" ;;
-        *)        echo "   $SVC → present (state unknown)" ;;
-    esac
-}
-
-svc_state birddog-mesh.service
-svc_state mediamtx.service
-svc_state hostapd.service
-svc_state dnsmasq.service
-svc_state nginx.service
-
-set +x
+echo "  Services:"
+for SVC in birddog-mesh birddog-stream mediamtx hostapd dnsmasq nginx; do
+    STATE=$(systemctl is-enabled "${SVC}.service" 2>/dev/null || echo "not-installed")
+    echo "    ${SVC}  →  $STATE"
+done
 
 echo ""
 echo "====================================="
-echo "BirdDog Field Reset Complete"
+echo "Field Reset Complete"
 echo "====================================="
 echo ""
-echo "Node ready for:"
-echo "    sudo birddog configure"
+echo "Node ready for: birddog configure"
 echo ""
-echo "Full trace saved to:"
-echo "    $LOG"
+echo "Full log: $LOG"
 echo ""
