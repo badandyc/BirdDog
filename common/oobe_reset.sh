@@ -13,7 +13,7 @@ BASH_XTRACEFD=3
 set -x
 
 echo "====================================="
-echo "BirdDog Factory Reset (OOBE)"
+echo "BirdDog Field Reset (OOBE)"
 echo "====================================="
 date | tee /dev/fd/3
 
@@ -28,7 +28,7 @@ echo "This will wipe BirdDog node configuration."
 echo "Golden installer baseline will be preserved."
 echo ""
 
-read -p "Type RESET to continue: " CONFIRM
+read -r -p "Type RESET to continue: " CONFIRM
 
 if [[ "$CONFIRM" != "RESET" ]]; then
     echo "Aborted."
@@ -120,6 +120,17 @@ mkdir -p /opt/birddog/mesh
 mkdir -p /opt/birddog/radio
 mkdir -p /opt/birddog/web
 
+step "Cleaning hostapd role config (preserve package directory)"
+
+if [[ -d /etc/hostapd ]]; then
+    rm -f /etc/hostapd/*.conf 2>/dev/null || true
+    rm -f /etc/hostapd/hostapd.accept 2>/dev/null || true
+    rm -f /etc/hostapd/hostapd.deny 2>/dev/null || true
+    echo "   hostapd role config cleared"
+else
+    echo "   /etc/hostapd not present"
+fi
+
 step "Resetting hostname"
 
 OLD_HOST=$(hostname)
@@ -142,7 +153,6 @@ step "Removing network configuration"
 
 remove_path /etc/systemd/network
 remove_path /etc/dnsmasq.conf
-remove_path /etc/hostapd
 remove_path /etc/systemd/system/hostapd.service.d
 
 step "Reloading systemd"
@@ -217,7 +227,7 @@ set +x
 
 echo ""
 echo "====================================="
-echo "BirdDog OOBE Reset Complete"
+echo "BirdDog Field Reset Complete"
 echo "====================================="
 echo ""
 echo "Node ready for:"
