@@ -140,28 +140,12 @@ systemctl restart avahi-daemon
 echo "  avahi restarted"
 
 # -------------------------------------------------------
-# Phase 4 — Radio mapping service
-# Installs + enables the boot-time radio mapping service.
-# Does not run the mapping now — takes effect on reboot.
+# Phase 4 — Role installer
 # -------------------------------------------------------
 
 echo ""
 echo "-------------------------------------"
-echo "Phase 4 — Radio Mapping"
-echo "-------------------------------------"
-
-bash "$BIRDDOG_ROOT/common/radio_map_setup.sh"
-
-echo "  Radio mapping service installed"
-echo "  Deterministic layout applies at next reboot"
-
-# -------------------------------------------------------
-# Phase 5 — Role installer
-# -------------------------------------------------------
-
-echo ""
-echo "-------------------------------------"
-echo "Phase 5 — Role: $ROLE"
+echo "Phase 4 — Role: $ROLE"
 echo "-------------------------------------"
 
 if [[ "$ROLE" == "bdc" ]]; then
@@ -207,12 +191,12 @@ else
 fi
 
 # -------------------------------------------------------
-# Phase 6 — Mesh
+# Phase 5 — Mesh
 # -------------------------------------------------------
 
 echo ""
 echo "-------------------------------------"
-echo "Phase 6 — Mesh"
+echo "Phase 5 — Mesh"
 echo "-------------------------------------"
 
 bash "$BIRDDOG_ROOT/mesh/add_mesh_network.sh" "$HOSTNAME_INPUT"
