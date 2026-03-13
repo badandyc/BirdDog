@@ -6,8 +6,8 @@ mkdir -p /opt/birddog
 
 LOG="/opt/birddog/oobe_reset.log"
 
-# stdout = operator
-# fd3 = logfile (full trace)
+# Operator output = stdout
+# Full gritty trace = logfile (fd 3)
 exec 3>>"$LOG"
 BASH_XTRACEFD=3
 set -x
@@ -156,8 +156,13 @@ for IFACE in wlan0 wlan1 wlan2; do
         echo "   normalizing $IFACE"
         ip link set "$IFACE" down || true
         iw dev "$IFACE" set type managed || true
+    else
+        echo "   $IFACE not present"
     fi
 done
+
+# FULL RADIO STATE → LOG ONLY
+iw dev >&3 2>&1 || true
 
 step "Restarting Avahi clean"
 
@@ -166,9 +171,25 @@ systemctl restart avahi-daemon
 
 step "Verification snapshot"
 
-hostname
-iw dev || true
-systemctl list-unit-files | grep -E "birddog|mediamtx|hostapd|dnsmasq" || true
+echo "Hostname: $(hostname)"
+echo ""
+
+echo "Radio Summary:"
+for IFACE in wlan0 wlan1 wlan2; do
+    if ip link show "$IFACE" >/dev/null 2>&1; then
+        MODE=$(iw dev "$IFACE" info 2>/dev/null | awk '/type/ {print $2}')
+        MAC=$(cat /sys/class/net/$IFACE/address 2>/dev/null)
+        echo "   $IFACE → present | mode=$MODE | mac=$MAC"
+    else
+        echo "   $IFACE → not present"
+    fi
+done
+
+echo ""
+echo "BirdDog Services:"
+systemctl is-enabled birddog-mesh.service 2>/dev/null || echo "   mesh: not installed"
+systemctl is-enabled mediamtx.service 2>/dev/null || true
+systemctl is-enabled hostapd.service 2>/dev/null || true
 
 set +x
 
