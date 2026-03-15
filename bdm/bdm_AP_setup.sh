@@ -2,9 +2,10 @@
 set -e
 set -o pipefail
 
-mkdir -p /opt/birddog
+mkdir -p /opt/birddog/logs
 
-LOG="/opt/birddog/install_ap.log"
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+LOG="/opt/birddog/logs/install_ap_${TIMESTAMP}.log"
 exec > >(tee -a "$LOG") 2>&1
 
 echo "================================="
@@ -79,25 +80,20 @@ echo "  Regulatory domain: US"
 
 # -------------------------------------------------------
 # Phase 3 — Transition NetworkManager → systemd-networkd
-# Write config first, then switch — minimises eth0 downtime
 # -------------------------------------------------------
 
 echo ""
 echo "=== Transitioning to systemd-networkd ==="
 
-# Enable networkd before stopping NM so there's minimal gap
 systemctl enable systemd-networkd
 systemctl start systemd-networkd
 
-# Now stop NetworkManager — eth0 will briefly lose its address
-# then networkd will re-acquire via DHCP
 if systemctl is-active --quiet NetworkManager 2>/dev/null; then
     echo "  Stopping NetworkManager..."
     systemctl stop NetworkManager || true
 fi
 systemctl disable NetworkManager 2>/dev/null || true
 
-# Trigger networkd to pick up eth0 immediately
 networkctl reload 2>/dev/null || true
 networkctl reconfigure eth0 2>/dev/null || true
 
@@ -106,9 +102,6 @@ echo "  NOTE: eth0 DHCP re-acquiring — SSH may briefly drop and reconnect"
 
 # -------------------------------------------------------
 # Phase 4 — Configure wlan2 for AP mode
-# At this point in first-run flow the radio mapping hasn't
-# run yet (that's post-reboot), so wlan2 may not exist by
-# name. We attempt setup but don't block on it.
 # -------------------------------------------------------
 
 echo ""
@@ -155,14 +148,12 @@ EOF
 
 echo "  hostapd.conf written"
 
-# Point /etc/default/hostapd at our config (legacy path, belt+suspenders)
 if grep -q "^DAEMON_CONF=" /etc/default/hostapd 2>/dev/null; then
     sed -i 's|^DAEMON_CONF=.*|DAEMON_CONF="/etc/hostapd/hostapd.conf"|' /etc/default/hostapd
 else
     echo 'DAEMON_CONF="/etc/hostapd/hostapd.conf"' >> /etc/default/hostapd
 fi
 
-# Single drop-in: ordering + rfkill unblock before start
 mkdir -p /etc/systemd/system/hostapd.service.d
 
 cat > /etc/systemd/system/hostapd.service.d/birddog.conf << EOF
@@ -173,7 +164,6 @@ After=systemd-networkd.service
 ExecStartPre=/usr/sbin/rfkill unblock wifi
 EOF
 
-# unmask MUST come before enable — Pi OS ships hostapd masked
 systemctl unmask hostapd
 systemctl enable hostapd
 echo "  hostapd enabled"
@@ -207,7 +197,6 @@ echo "=== Starting AP services ==="
 
 systemctl daemon-reload
 
-# Only attempt to start if interface exists (post-reboot it will)
 if ip link show "${AP_IF}" >/dev/null 2>&1; then
 
     for i in 1 2 3; do
