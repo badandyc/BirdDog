@@ -20,7 +20,11 @@ echo "  Role : $ROLE"
 echo ""
 
 NODE_NUM=$(echo "$HOST" | grep -oE '[0-9]{2}' || echo "00")
-MESH_IP="10.10.20.$((10#$NODE_NUM * 10))"
+if [[ "$ROLE" == "BDM" ]]; then
+    MESH_IP="10.10.20.$((10#$NODE_NUM))"
+else
+    MESH_IP="10.10.20.$((10#$NODE_NUM * 10))"
+fi
 
 if [[ "$ROLE" != "UNKNOWN" ]]; then
     echo "  Mesh IP : $MESH_IP"
@@ -133,8 +137,9 @@ fi
 # Check for at least one reachable mesh peer (only meaningful when configured)
 if [[ "$ROLE" != "UNKNOWN" ]]; then
     PEER_FOUND=0
-    for slot in $(seq 1 5); do
-        TARGET="10.10.20.$((slot * 10))"
+    # Scan BDM slots (.1-.9) and BDC slots (.10,.20,.30,.40,.50)
+    for TARGET in 10.10.20.1 10.10.20.2 10.10.20.3 10.10.20.4 10.10.20.5 \
+                  10.10.20.10 10.10.20.20 10.10.20.30 10.10.20.40 10.10.20.50; do
         [[ "$TARGET" == "$MESH_IP" ]] && continue
         if ping -c1 -W1 "$TARGET" >/dev/null 2>&1; then
             pass "Mesh peer reachable: $TARGET"
