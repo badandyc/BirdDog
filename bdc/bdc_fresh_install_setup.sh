@@ -108,12 +108,10 @@ cat > /usr/local/bin/birddog-stream.sh << 'STREAM_EOF'
 
 BDM_HOST="__BDM_HOST__"
 STREAM_NAME="__STREAM_NAME__"
-PIPE=/tmp/birddog_stream.h264
 
 cleanup() {
     echo "Stream shutting down — cleaning up"
     pkill -f rpicam-vid 2>/dev/null || true
-    rm -f "$PIPE"
 }
 
 trap cleanup EXIT INT TERM
@@ -122,41 +120,31 @@ trap cleanup EXIT INT TERM
 pkill -f rpicam-vid 2>/dev/null || true
 sleep 1
 
-rm -f "$PIPE"
-mkfifo "$PIPE"
-
-echo "Starting camera capture..."
-
-rpicam-vid -t 0 --nopreview \
-    --width 640 --height 480 \
-    --framerate 30 \
-    --intra 15 --inline \
-    -o "$PIPE" &
-
-CAM_PID=$!
-sleep 2
-
-# Verify camera process is still alive before starting ffmpeg
-if ! kill -0 "$CAM_PID" 2>/dev/null; then
-    echo "ERROR: rpicam-vid failed to start"
-    exit 1
-fi
-
 echo "Starting RTSP stream → rtsp://${BDM_HOST}:8554/${STREAM_NAME}"
 
+# Stream directly via stdout pipe — no named fifo needed
+# -re: read at real-time rate, prevents buffer buildup
+# -framerate 15: explicit input rate for proper timestamping
+# -fflags +discardcorrupt: drop corrupt frames rather than stalling
+# -rtsp_transport udp: UDP avoids TCP stall/retransmit on lossy mesh
+# -pkt_size 1300: keep packets under mesh MTU
+rpicam-vid -t 0 --nopreview \
+    --width 640 --height 480 \
+    --framerate 15 \
+    --intra 15 --inline \
+    --codec h264 \
+    -o - 2>/dev/null | \
 ffmpeg \
-    -probesize 32 \
-    -analyzeduration 0 \
-    -use_wallclock_as_timestamps 1 \
-    -f h264 -i "$PIPE" \
+    -re \
+    -f h264 \
+    -framerate 15 \
+    -i pipe:0 \
     -c:v copy \
-    -fflags +genpts+nobuffer \
-    -flush_packets 1 \
-    -rtsp_transport tcp \
+    -fflags +discardcorrupt \
+    -rtsp_transport udp \
     -pkt_size 1300 \
     -f rtsp "rtsp://${BDM_HOST}:8554/${STREAM_NAME}"
 
-# ffmpeg exited — cleanup trap will fire
 STREAM_EOF
 
 # Inject node-specific values
