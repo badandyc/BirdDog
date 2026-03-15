@@ -60,14 +60,24 @@ fi
 echo ""
 echo "=== Writing configuration ==="
 
-cat > "$CONFIG" << 'EOF'
+# Detect eth0 IP for WebRTC ICE candidate locking
+ETH0_IP=$(ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet )[^/]+' | head -1)
+if [[ -z "$ETH0_IP" ]]; then
+    echo "  WARNING: eth0 IP not found — WebRTC will use all interfaces"
+    WEBRTC_UDP_ADDR=":8189"
+else
+    echo "  eth0 IP detected: $ETH0_IP"
+    WEBRTC_UDP_ADDR="${ETH0_IP}:8189"
+fi
+
+cat > "$CONFIG" << EOF
 logLevel: info
 logDestinations: [stdout]
 
 # Timeouts — increased for mesh link latency and low fps streams
 readTimeout: 30s
 writeTimeout: 30s
-readBufferCount: 512
+writeQueueSize: 512
 
 # Allow any client to publish or read — fleet is trusted
 authMethod: internal
@@ -89,7 +99,7 @@ rtspAddress: :8554
 
 # Disabled protocols — not needed for BirdDog
 rtmp: false
-hls: false
+hls: true
 srt: false
 metrics: false
 pprof: false
@@ -97,9 +107,8 @@ playback: false
 
 webrtc: true
 webrtcAddress: :8889
+webrtcLocalUDPAddress: ${WEBRTC_UDP_ADDR}
 webrtcAllowOrigins: ['*']
-# Lock WebRTC ICE to eth0 and AP interface — prevents inconsistent candidate selection
-webrtcLocalUDPAddress: :8189
 webrtcICEServers2: []
 
 pathDefaults:
