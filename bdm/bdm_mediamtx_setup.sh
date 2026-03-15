@@ -100,7 +100,6 @@ webrtcAddress: :8889
 webrtcAllowOrigins: ['*']
 # Lock WebRTC ICE to eth0 and AP interface — prevents inconsistent candidate selection
 webrtcLocalUDPAddress: :8189
-webrtcICEHostObfuscation: false
 webrtcICEServers2: []
 
 pathDefaults:
