@@ -196,7 +196,7 @@ if [[ "$ROLE" == "BDM" ]]; then
     if curl -s --connect-timeout 3 http://localhost:9997/v3/paths/list >/dev/null 2>&1; then
         pass "MediaMTX API responding"
         STREAM_COUNT=$(curl -s http://localhost:9997/v3/paths/list \
-            | grep -c '"ready":true' 2>/dev/null || echo 0)
+            | grep -c '"ready":true' 2>/dev/null) || STREAM_COUNT=0
         echo "     Active streams: $STREAM_COUNT"
     else
         warn "MediaMTX API not responding"
