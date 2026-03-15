@@ -64,6 +64,11 @@ cat > "$CONFIG" << 'EOF'
 logLevel: info
 logDestinations: [stdout]
 
+# Timeouts — increased for mesh link latency and low fps streams
+readTimeout: 30s
+writeTimeout: 30s
+readBufferCount: 512
+
 # Allow any client to publish or read — fleet is trusted
 authMethod: internal
 authInternalUsers:
@@ -93,6 +98,10 @@ playback: false
 webrtc: true
 webrtcAddress: :8889
 webrtcAllowOrigins: ['*']
+# Lock WebRTC ICE to eth0 and AP interface — prevents inconsistent candidate selection
+webrtcLocalUDPAddress: :8189
+webrtcICEHostObfuscation: false
+webrtcICEServers2: []
 
 pathDefaults:
   source: publisher
