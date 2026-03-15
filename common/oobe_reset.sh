@@ -77,6 +77,10 @@ svc_stop_disable hostapd.service
 svc_stop_disable dnsmasq.service
 svc_stop_disable nginx.service
 
+# Re-mask hostapd — Pi OS ships it masked, configure unmasks it.
+# oobe restores the masked state so it can't accidentally start.
+systemctl mask hostapd 2>/dev/null && echo "  masked   hostapd.service" || true
+
 # -------------------------------------------------------
 # Step 2 — Remove runtime scripts
 # -------------------------------------------------------
@@ -218,6 +222,9 @@ for SVC in birddog-mesh birddog-stream mediamtx hostapd dnsmasq nginx; do
     [[ -z "$STATE" ]] && STATE="not-found"
     if [[ "$SVC" == "dnsmasq" || "$SVC" == "nginx" ]] && [[ "$STATE" == "enabled" ]]; then
         STATE="enabled (by design)"
+    fi
+    if [[ "$SVC" == "hostapd" ]] && [[ "$STATE" == "masked" ]]; then
+        STATE="masked (by design)"
     fi
     echo "    ${SVC}  →  $STATE"
 done
