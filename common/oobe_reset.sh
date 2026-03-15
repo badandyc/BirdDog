@@ -139,6 +139,17 @@ remove_path /etc/dnsmasq.conf
 # networkd config (written by AP setup)
 remove_path /etc/systemd/network
 
+# Restore eth0 DHCP so management access survives reboot
+mkdir -p /etc/systemd/network
+cat > /etc/systemd/network/10-eth0.network << 'EOF'
+[Match]
+Name=eth0
+
+[Network]
+DHCP=yes
+EOF
+echo "  eth0 DHCP config restored"
+
 # -------------------------------------------------------
 # Step 5 — Reset hostname
 # -------------------------------------------------------
