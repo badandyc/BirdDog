@@ -86,6 +86,7 @@ apiAllowOrigins: ['*']
 
 rtsp: true
 rtspAddress: :8554
+rtspSessionTimeout: 300s
 
 # Disabled protocols — not needed for BirdDog
 rtmp: false
