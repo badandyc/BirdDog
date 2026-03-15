@@ -232,47 +232,68 @@ async function refresh() {
         return;
     }
 
-    grid.innerHTML = '';
-
     let liveCount = 0;
 
     SLOTS.forEach(name => {
 
-        const tile = document.createElement('div');
-        tile.className = 'tile';
-        tile.id = 'tile-' + name;
+        let tile = document.getElementById('tile-' + name);
+        const isLive = active.has(name);
+        const hasFrame = tile && tile.querySelector('iframe');
+        const hasEmpty = tile && tile.querySelector('.tile-empty');
 
-        const label = document.createElement('div');
-        label.className = 'tile-label';
-        label.textContent = name;
+        // Create tile if it doesn't exist yet
+        if (!tile) {
+            tile = document.createElement('div');
+            tile.className = 'tile';
+            tile.id = 'tile-' + name;
 
-        const dot = document.createElement('div');
-        dot.className = 'tile-status';
+            const label = document.createElement('div');
+            label.className = 'tile-label';
+            label.textContent = name;
 
-        if (active.has(name)) {
+            const dot = document.createElement('div');
+            dot.className = 'tile-status';
+
+            tile.appendChild(label);
+            tile.appendChild(dot);
+            grid.appendChild(tile);
+        }
+
+        const dot = tile.querySelector('.tile-status');
+
+        if (isLive) {
 
             liveCount++;
-            dot.classList.add('live');
+            dot.className = 'tile-status live';
 
-            const frame = document.createElement('iframe');
-            frame.src = `http://${host}:8889/${name}`;
-            frame.allow = 'autoplay';
+            // Only create iframe if not already streaming — avoids reset
+            if (!hasFrame) {
+                const empty = tile.querySelector('.tile-empty');
+                if (empty) empty.remove();
 
-            tile.appendChild(frame);
+                const frame = document.createElement('iframe');
+                frame.src = `http://${host}:8889/${name}`;
+                frame.allow = 'autoplay';
+                tile.insertBefore(frame, tile.firstChild);
+            }
 
         } else {
 
-            dot.classList.add('dead');
-            const empty = document.createElement('div');
-            empty.className = 'tile-empty';
-            empty.textContent = name + ' — no signal';
-            tile.appendChild(empty);
+            dot.className = 'tile-status dead';
+
+            // Remove iframe if stream went offline
+            if (hasFrame) {
+                hasFrame.remove();
+            }
+
+            if (!hasEmpty) {
+                const empty = document.createElement('div');
+                empty.className = 'tile-empty';
+                empty.textContent = name + ' — no signal';
+                tile.insertBefore(empty, tile.firstChild);
+            }
 
         }
-
-        tile.appendChild(label);
-        tile.appendChild(dot);
-        grid.appendChild(tile);
 
     });
 
