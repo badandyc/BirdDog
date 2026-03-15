@@ -119,7 +119,7 @@ normalize_and_join() {
 
     iw dev wlan1 set channel 1 HT20 >> "$LOG" 2>&1 || true
 
-    iw dev wlan1 mesh join birddog-mesh freq 2412 >> "$LOG" 2>&1 || {
+    iw dev wlan1 mesh join birddog-mesh freq 2412 HT20 >> "$LOG" 2>&1 || {
         log "mesh join failed — will retry"
         sleep $(( RANDOM % 4 + 2 ))
         LAST_JOIN_TIME=$(date +%s)
