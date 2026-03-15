@@ -83,7 +83,10 @@ interface_exists() {
 }
 
 mesh_joined() {
-    iw dev wlan1 info 2>/dev/null | grep -q "mesh id birddog-mesh"
+    # Check for "type mesh point" — mt76x2u driver does not always show
+    # "mesh id" in iw dev info even when correctly joined, so we check
+    # the interface type instead which is reliably reported.
+    iw dev wlan1 info 2>/dev/null | grep -q "type mesh point"
 }
 
 assign_ip_if_missing() {
@@ -119,7 +122,7 @@ normalize_and_join() {
 
     iw dev wlan1 set channel 1 HT20 >> "$LOG" 2>&1 || true
 
-    iw dev wlan1 mesh join birddog-mesh freq 2412 HT20 >> "$LOG" 2>&1 || {
+    iw dev wlan1 mesh join birddog-mesh freq 2412 >> "$LOG" 2>&1 || {
         log "mesh join failed — will retry"
         sleep $(( RANDOM % 4 + 2 ))
         LAST_JOIN_TIME=$(date +%s)
