@@ -2,10 +2,11 @@
 set -e
 set -o pipefail
 
-mkdir -p /opt/birddog
+mkdir -p /opt/birddog/logs
 mkdir -p /opt/birddog/mediamtx
 
-LOG="/opt/birddog/install_mediamtx.log"
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+LOG="/opt/birddog/logs/install_mediamtx_${TIMESTAMP}.log"
 exec > >(tee -a "$LOG") 2>&1
 
 echo "================================="
@@ -140,7 +141,7 @@ systemctl enable mediamtx
 systemctl restart mediamtx
 
 # -------------------------------------------------------
-# Verification — use is-active not status to avoid set -e
+# Verification
 # -------------------------------------------------------
 
 echo ""
