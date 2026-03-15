@@ -3,8 +3,10 @@ set -e
 set -o pipefail
 
 mkdir -p /opt/birddog/bdc
+mkdir -p /opt/birddog/logs
 
-LOG="/opt/birddog/bdc/install_bdc.log"
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+LOG="/opt/birddog/logs/install_bdc_${TIMESTAMP}.log"
 exec > >(tee -a "$LOG") 2>&1
 
 echo "================================="
@@ -43,7 +45,6 @@ echo "  Config saved : $CONFIG_FILE"
 
 # -------------------------------------------------------
 # Stream service state check
-# If already running with the same config, skip reinstall
 # -------------------------------------------------------
 
 echo ""
@@ -56,7 +57,6 @@ fi
 
 # -------------------------------------------------------
 # Camera verification
-# Non-fatal — warns operator but does not abort configuration
 # -------------------------------------------------------
 
 echo ""
@@ -94,8 +94,6 @@ fi
 
 # -------------------------------------------------------
 # Write stream runtime script
-# Uses quoted heredoc — BDM_HOST and STREAM_NAME injected
-# via sed so the generated script has them as literals
 # -------------------------------------------------------
 
 echo ""
@@ -132,7 +130,7 @@ echo "Starting camera capture..."
 rpicam-vid -t 0 --nopreview \
     --width 640 --height 480 \
     --framerate 30 \
-    --intra 30 --inline \
+    --intra 15 --inline \
     -o "$PIPE" &
 
 CAM_PID=$!
@@ -147,11 +145,15 @@ fi
 echo "Starting RTSP stream → rtsp://${BDM_HOST}:8554/${STREAM_NAME}"
 
 ffmpeg \
+    -probesize 32 \
+    -analyzeduration 0 \
     -use_wallclock_as_timestamps 1 \
     -f h264 -i "$PIPE" \
     -c:v copy \
-    -fflags +genpts \
+    -fflags +genpts+nobuffer \
+    -flush_packets 1 \
     -rtsp_transport tcp \
+    -pkt_size 1300 \
     -f rtsp "rtsp://${BDM_HOST}:8554/${STREAM_NAME}"
 
 # ffmpeg exited — cleanup trap will fire
