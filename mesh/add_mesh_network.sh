@@ -20,7 +20,14 @@ if [[ -z "$NODE_NUM" ]]; then
     exit 1
 fi
 
-MESH_IP="10.10.20.$((NODE_NUM * 10))"
+# IP scheme:
+#   BDM → 10.10.20.1 - 10.10.20.9   (node number as-is)
+#   BDC → 10.10.20.10, .20, .30...   (node number × 10)
+if [[ "$HOSTNAME_INPUT" =~ ^bdm- ]]; then
+    MESH_IP="10.10.20.$((10#$NODE_NUM))"
+else
+    MESH_IP="10.10.20.$((10#$NODE_NUM * 10))"
+fi
 
 echo "Node     : $HOSTNAME_INPUT"
 echo "Mesh IP  : $MESH_IP/24"
@@ -35,9 +42,6 @@ systemctl disable dhcpcd.service 2>/dev/null || true
 
 # -------------------------------------------------------
 # Write the mesh runtime script
-# Uses quoted 'RUNTIME_EOF' so the heredoc is literal —
-# no variable expansion here. MESH_IP and RUNTIME_LOG are
-# injected via sed after the heredoc is written.
 # -------------------------------------------------------
 
 cat > /usr/local/bin/birddog-mesh-join.sh << 'RUNTIME_EOF'
@@ -59,12 +63,12 @@ MESH_IP="__MESH_IP__/24"
 #   RECOVERY        no peer for RECOVERY_THRESHOLD seconds — rejoin
 
 STATE="INIT"
-LAST_PEER_TIME=0       # set to 0 so delta starts large; assigned on first peer
+LAST_PEER_TIME=0
 LAST_JOIN_TIME=0
 
-JOIN_COOLDOWN=15       # min seconds between join attempts
-SUSPECT_THRESHOLD=15   # seconds without peer before SUSPECT
-RECOVERY_THRESHOLD=40  # seconds without peer before full rejoin
+JOIN_COOLDOWN=15
+SUSPECT_THRESHOLD=15
+RECOVERY_THRESHOLD=40
 
 log() {
     echo "[$(date '+%H:%M:%S')] [mesh] $1" >> "$LOG"
@@ -129,17 +133,11 @@ normalize_and_join() {
 }
 
 check_for_peer() {
-    # Check ARP/neighbour table for any known mesh peer.
-    # Pings a peer to populate the neighbour table, but only
-    # checks neighbours that actually exist — not all 25 slots.
     local PEER_FOUND=0
 
-    # First check if we already have neighbours without pinging
     if ip neigh show dev wlan1 2>/dev/null | grep -qv "FAILED"; then
         PEER_FOUND=1
     else
-        # No neighbours yet — try pinging a few likely IPs to solicit a response
-        # Only ping nodes near our own number to keep this bounded
         local OWN_OCTET
         OWN_OCTET=$(echo "$MESH_IP" | cut -d/ -f1 | awk -F. '{print $4}')
         local OWN_NUM=$(( OWN_OCTET / 10 ))
@@ -208,7 +206,6 @@ while true; do
 
     NOW=$(date +%s)
 
-    # Initialise LAST_PEER_TIME on first peer sighting
     if [[ "$PEER_FOUND" -eq 1 && "$LAST_PEER_TIME" -eq 0 ]]; then
         LAST_PEER_TIME=$NOW
     fi
@@ -260,7 +257,6 @@ while true; do
         CONVERGING) sleep 2  ;;
         SUSPECT)    sleep 5  ;;
         STEADY)
-            # Warm known neighbours to keep ARP table alive
             while IFS= read -r line; do
                 PEER_IP=$(echo "$line" | awk '{print $1}')
                 [[ -n "$PEER_IP" ]] && ping -c1 -W1 "$PEER_IP" >/dev/null 2>&1 || true
@@ -273,7 +269,7 @@ while true; do
 done
 RUNTIME_EOF
 
-# Inject the node-specific values that were resolved at configure time
+# Inject node-specific values
 sed -i "s|__RUNTIME_LOG__|${RUNTIME_LOG}|g" /usr/local/bin/birddog-mesh-join.sh
 sed -i "s|__MESH_IP__|${MESH_IP}|g"         /usr/local/bin/birddog-mesh-join.sh
 
