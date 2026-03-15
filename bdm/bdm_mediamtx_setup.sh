@@ -99,7 +99,7 @@ rtspAddress: :8554
 
 # Disabled protocols — not needed for BirdDog
 rtmp: false
-hls: true
+hls: false
 srt: false
 metrics: false
 pprof: false
