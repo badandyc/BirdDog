@@ -712,4 +712,18 @@ echo "Golden image creation complete"
 printf "  Commit : %s\n" "$REMOTE_COMMIT"
 printf "  Mode   : %s\n" "$BIRDDOG_MODE"
 echo "====================================="
-echo "Next step: birddog configure"
+echo ""
+
+if [[ "$BIRDDOG_MODE" == "full" ]]; then
+    echo "====================================="
+    echo "⚠  REBOOT REQUIRED"
+    echo "====================================="
+    echo ""
+    echo "  Udev rules and system services were installed."
+    echo "  Reboot before running birddog configure."
+    echo ""
+    echo "    sudo reboot"
+    echo ""
+else
+    echo "Next step: birddog configure"
+fi
