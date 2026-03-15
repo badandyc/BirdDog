@@ -2,9 +2,10 @@
 set -e
 set -o pipefail
 
-mkdir -p /opt/birddog
+mkdir -p /opt/birddog/logs
 
-LOG="/opt/birddog/install_web.log"
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+LOG="/opt/birddog/logs/install_web_${TIMESTAMP}.log"
 exec > >(tee -a "$LOG") 2>&1
 
 echo "================================="
@@ -55,16 +56,12 @@ EOF
 ln -sf /etc/nginx/sites-available/birddog \
        /etc/nginx/sites-enabled/birddog
 
-# Remove default nginx site if present
 rm -f /etc/nginx/sites-enabled/default
 
 echo "  nginx config written"
 
 # -------------------------------------------------------
 # Dashboard
-# Quad-view layout: 2×2 fixed grid sized to stream resolution
-# Streams are 640×480 — tiles are sized to match exactly
-# so the browser never scales the video up and causes pixelation
 # -------------------------------------------------------
 
 echo ""
@@ -121,9 +118,6 @@ button:hover { background: #2a2a2a; color: #fff; }
     font-size: 11px;
 }
 
-/* Quad grid — 2×2, tiles exactly match 640×480 stream resolution.
-   No scaling = no pixelation. On smaller screens tiles scale down
-   proportionally via the viewport meta tag. */
 #grid {
     display: grid;
     grid-template-columns: 640px 640px;
@@ -171,16 +165,11 @@ button:hover { background: #2a2a2a; color: #fff; }
 .tile-status.live  { background: #2d9e2d; }
 .tile-status.dead  { background: #6b2020; }
 
-/* WebRTC iframe — fill tile exactly, no margins, no scrollbars */
 .tile iframe {
     width: 640px;
     height: 480px;
     border: none;
     display: block;
-    /* Strip mediamtx player chrome via CSS injection is not possible
-       across origins, so we size the iframe to overflow slightly and
-       clip — hides the bottom control bar */
-    margin-top: -0px;
 }
 
 .tile-empty {
@@ -208,7 +197,7 @@ button:hover { background: #2a2a2a; color: #fff; }
 <script>
 
 const SLOTS = ['cam01', 'cam02', 'cam03', 'cam04'];
-const REFRESH_INTERVAL = 15000;  // re-check stream states every 15s
+const REFRESH_INTERVAL = 15000;
 
 let refreshTimer = null;
 
@@ -266,7 +255,6 @@ async function refresh() {
             dot.classList.add('live');
 
             const frame = document.createElement('iframe');
-            // Load mediamtx WebRTC player — auto-plays the stream
             frame.src = `http://${host}:8889/${name}`;
             frame.allow = 'autoplay';
 
