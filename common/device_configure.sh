@@ -72,16 +72,24 @@ ROLE=$(echo "$HOSTNAME_INPUT" | cut -d- -f1)
 NODE_NUM=$(echo "$HOSTNAME_INPUT" | cut -d- -f2)
 STREAM_NAME="cam${NODE_NUM}"
 
+# IP scheme:
+#   BDM → 10.10.20.1 - 10.10.20.9   (node number as-is)
+#   BDC → 10.10.20.10, .20, .30...   (node number × 10)
+if [[ "$ROLE" == "bdm" ]]; then
+    MESH_IP="10.10.20.$((10#$NODE_NUM))"
+else
+    MESH_IP="10.10.20.$((10#$NODE_NUM * 10))"
+fi
+
 echo ""
 echo "  Hostname : $HOSTNAME_INPUT"
 echo "  Role     : $ROLE"
 echo "  Node     : $NODE_NUM"
+echo "  Mesh IP  : $MESH_IP"
 echo "  Stream   : $STREAM_NAME"
 
 # -------------------------------------------------------
 # Phase 3 — Hostname + hosts table
-# Device configure owns ALL hostname setup.
-# Write everything before restarting any services.
 # -------------------------------------------------------
 
 echo ""
@@ -91,20 +99,13 @@ echo "-------------------------------------"
 
 # Stop cloud-init from overwriting our hostname on next boot
 if [[ -f /etc/cloud/cloud-init.disabled ]] || [[ ! -d /etc/cloud ]]; then
-    true  # already disabled or not present
+    true
 elif [[ -f /etc/cloud/cloud.cfg ]]; then
     sed -i 's/^manage_etc_hosts:.*/manage_etc_hosts: false/' /etc/cloud/cloud.cfg || true
     touch /etc/cloud/cloud-init.disabled
 fi
 
-# Write hostname to disk first — before hostnamectl, before avahi
 echo "$HOSTNAME_INPUT" > /etc/hostname
-
-# Build /etc/hosts
-# Mesh IP scheme: node number × 10 → last octet
-# e.g. node 01 → 10.10.20.10, node 02 → 10.10.20.20
-# BDM and BDC with the same number share the same mesh IP by design —
-# the fleet never has a BDM and BDC with the same node number.
 
 TMP_HOSTS=$(mktemp)
 
@@ -117,23 +118,29 @@ ff02::1 ip6-allnodes
 ff02::2 ip6-allrouters
 
 # BirdDog Mesh Nodes
+# BDM nodes: .1-.9   BDC nodes: .10,.20,.30...
 EOF
 
+# BDM entries — node number as-is (.1 through .9)
+for slot in $(seq 1 9); do
+    IP="10.10.20.$slot"
+    BDM_NAME="bdm-$(printf "%02d" $slot)"
+    echo "$IP $BDM_NAME" >> "$TMP_HOSTS"
+done
+
+# BDC entries — node number × 10 (.10 through .250)
 for slot in $(seq 1 25); do
     IP="10.10.20.$((slot * 10))"
     BDC_NAME="bdc-$(printf "%02d" $slot)"
-    BDM_NAME="bdm-$(printf "%02d" $slot)"
-    echo "$IP $BDC_NAME $BDM_NAME" >> "$TMP_HOSTS"
+    echo "$IP $BDC_NAME" >> "$TMP_HOSTS"
 done
 
 mv "$TMP_HOSTS" /etc/hosts
 echo "  /etc/hosts written"
 
-# Now apply hostname — /etc/hostname and /etc/hosts are already correct
 hostnamectl set-hostname "$HOSTNAME_INPUT"
 echo "  hostname set: $HOSTNAME_INPUT"
 
-# Clear stale avahi cache and restart — hosts file is already in place
 rm -rf /var/lib/avahi-daemon/* 2>/dev/null || true
 systemctl enable avahi-daemon 2>/dev/null || true
 systemctl restart avahi-daemon
@@ -178,9 +185,6 @@ elif [[ "$ROLE" == "bdm" ]]; then
 
     echo ""
     echo "  Running BDM installer..."
-
-    # bdm_initial_setup no longer handles hostname — that's done above.
-    # It handles AP networking, mediamtx, and the web dashboard.
     bash "$BIRDDOG_ROOT/bdm/bdm_AP_setup.sh"
     bash "$BIRDDOG_ROOT/bdm/bdm_mediamtx_setup.sh"
     bash "$BIRDDOG_ROOT/bdm/bdm_web_setup.sh"
@@ -210,7 +214,6 @@ else
     echo ""
     echo "  WARNING: birddog-mesh service did not start"
     echo "  This may be expected before first reboot"
-    echo "  (radio mapping takes effect at next boot)"
 fi
 
 # -------------------------------------------------------
@@ -222,12 +225,18 @@ echo "====================================="
 echo "Device configuration complete"
 echo "  Hostname : $HOSTNAME_INPUT"
 echo "  Role     : $ROLE"
-echo "  Mesh IP  : 10.10.20.$((10#$NODE_NUM * 10))"
+echo "  Mesh IP  : $MESH_IP"
 if [[ "$ROLE" == "bdc" ]]; then
     echo "  Stream   : rtsp://$BDM_HOST:8554/$STREAM_NAME"
 fi
 echo "====================================="
 echo ""
-echo "Reboot now to apply radio mapping:"
-echo "  sudo reboot"
+echo "====================================="
+echo "⚠  REBOOT REQUIRED"
+echo "====================================="
+echo ""
+echo "  Configuration changes do not take full effect"
+echo "  until the node is rebooted."
+echo ""
+echo "    sudo reboot"
 echo ""
