@@ -147,6 +147,10 @@ Name=eth0
 
 [Network]
 DHCP=yes
+
+[DHCP]
+ClientIdentifier=mac
+SendHostname=yes
 EOF
 echo "  eth0 DHCP config restored"
 
