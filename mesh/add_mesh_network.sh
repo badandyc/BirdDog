@@ -122,7 +122,7 @@ normalize_and_join() {
 
     iw dev wlan1 set channel 1 HT20 >> "$LOG" 2>&1 || true
 
-    iw dev wlan1 mesh join birddog-mesh freq 2412 >> "$LOG" 2>&1 || {
+    iw dev wlan1 mesh join birddog-mesh freq 2412 HT20 >> "$LOG" 2>&1 || {
         log "mesh join failed — will retry"
         sleep $(( RANDOM % 4 + 2 ))
         LAST_JOIN_TIME=$(date +%s)
@@ -130,6 +130,10 @@ normalize_and_join() {
     }
 
     ip addr replace "$MESH_IP" dev wlan1 >> "$LOG" 2>&1 || true
+
+    # Set RSSI threshold — reject direct peers weaker than -65 dBm
+    # Forces mesh to route through better intermediate nodes
+    iw dev wlan1 set mesh_param mesh_rssi_threshold -65 >> "$LOG" 2>&1 || true
 
     LAST_JOIN_TIME=$(date +%s)
     log "join successful — IP: $MESH_IP"
