@@ -1,27 +1,28 @@
 #!/bin/bash
-set -e
 set -o pipefail
 
 if [[ "$EUID" -ne 0 ]]; then
     exec sudo -E bash "$0" "$@"
 fi
 
+BIRDDOG_ROOT="/opt/birddog"
+mkdir -p "$BIRDDOG_ROOT/logs"
+
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+LOG="$BIRDDOG_ROOT/logs/script_update_${TIMESTAMP}.log"
+exec > >(tee -a "$LOG") 2>&1
+
 echo "====================================="
 echo "BirdDog Script Update"
 echo "====================================="
 echo ""
 
-BIRDDOG_ROOT="/opt/birddog"
 VERSION_DIR="$BIRDDOG_ROOT/version"
 COMMIT_FILE="$VERSION_DIR/COMMIT"
 VERSION_FILE="$VERSION_DIR/VERSION"
 BUILD_FILE="$VERSION_DIR/BUILD"
 
 mkdir -p "$BIRDDOG_ROOT"/{bdm,bdc,mesh,common,mediamtx,web,logs,version}
-
-# --------------------------------------------------
-# COMMIT STATE
-# --------------------------------------------------
 
 echo "[Update] Resolving repository state"
 
@@ -50,18 +51,12 @@ else
 fi
 
 echo ""
-
-# --------------------------------------------------
-# FETCH SCRIPTS
-# --------------------------------------------------
-
 echo "[Update] Fetching scripts"
 
 FETCH_FAILED=0
 SELF_UPDATED=0
 REBOOT_NEEDED=0
 
-# Scripts that affect running services and require reboot when changed
 REBOOT_SCRIPTS=(
     "common/golden_image_creation.sh"
     "common/device_configure.sh"
@@ -79,30 +74,28 @@ fetch_file() {
 
     if ! curl --connect-timeout 10 --retry 3 --retry-delay 2 -fsSL \
         "https://raw.githubusercontent.com/badandyc/BirdDog/${REMOTE_COMMIT}/${SRC}" \
-        -o "$TMP"; then
+        -o "$TMP" 2>/dev/null; then
         echo "  FAILED    $SRC"
         FETCH_FAILED=1
         rm -f "$TMP"
-        return
+        return 0
     fi
 
-    # Self-updater: stage alongside current, activate atomically after all
-    # other fetches succeed — avoids running a half-written version of ourselves
     if [[ "$SRC" == "common/script_update.sh" ]]; then
         if cmp -s "$TMP" "$DEST" 2>/dev/null; then
             echo "  UNCHANGED $SRC"
             rm -f "$TMP"
         else
             echo "  STAGED    $SRC  (will activate after fetch completes)"
-            install -m 0755 "$TMP" "${DEST}.new"
+            install -m 0755 "$TMP" "${DEST}.new" || true
             SELF_UPDATED=1
         fi
-        return
+        return 0
     fi
 
     if [[ ! -f "$DEST" ]]; then
         echo "  NEW       $SRC"
-        install -m 0755 "$TMP" "$DEST"
+        install -m 0755 "$TMP" "$DEST" || true
         for RS in "${REBOOT_SCRIPTS[@]}"; do
             [[ "$SRC" == "$RS" ]] && REBOOT_NEEDED=1
         done
@@ -111,16 +104,16 @@ fetch_file() {
         rm -f "$TMP"
     else
         echo "  UPDATED   $SRC"
-        install -m 0755 "$TMP" "$DEST"
+        install -m 0755 "$TMP" "$DEST" || true
         for RS in "${REBOOT_SCRIPTS[@]}"; do
             [[ "$SRC" == "$RS" ]] && REBOOT_NEEDED=1
         done
     fi
+
+    return 0
 }
 
-# Self first so we detect if it changed
 fetch_file common/script_update.sh          "$BIRDDOG_ROOT/common/script_update.sh"
-
 fetch_file common/golden_image_creation.sh  "$BIRDDOG_ROOT/common/golden_image_creation.sh"
 fetch_file common/device_configure.sh       "$BIRDDOG_ROOT/common/device_configure.sh"
 fetch_file common/oobe_reset.sh             "$BIRDDOG_ROOT/common/oobe_reset.sh"
@@ -131,34 +124,21 @@ fetch_file bdm/bdm_web_setup.sh             "$BIRDDOG_ROOT/bdm/bdm_web_setup.sh"
 fetch_file bdc/bdc_fresh_install_setup.sh   "$BIRDDOG_ROOT/bdc/bdc_fresh_install_setup.sh"
 fetch_file mesh/add_mesh_network.sh         "$BIRDDOG_ROOT/mesh/add_mesh_network.sh"
 
-# --------------------------------------------------
-# ABORT IF ANY FETCH FAILED
-# --------------------------------------------------
-
 if [[ "$FETCH_FAILED" -eq 1 ]]; then
     echo ""
     echo "ERROR: One or more scripts failed to fetch"
     echo "       Platform identity not updated"
-    echo "       Staged updater (if any) not activated"
     rm -f "$BIRDDOG_ROOT/common/script_update.sh.new"
     exit 1
 fi
 
-# --------------------------------------------------
-# PERMISSIONS
-# --------------------------------------------------
-
 echo ""
 echo "[Update] Setting permissions"
 
-chmod +x "$BIRDDOG_ROOT"/common/*.sh
-chmod +x "$BIRDDOG_ROOT"/bdm/*.sh
-chmod +x "$BIRDDOG_ROOT"/bdc/*.sh
-chmod +x "$BIRDDOG_ROOT"/mesh/*.sh
-
-# --------------------------------------------------
-# ACTIVATE STAGED SELF-UPDATER
-# --------------------------------------------------
+chmod +x "$BIRDDOG_ROOT"/common/*.sh || true
+chmod +x "$BIRDDOG_ROOT"/bdm/*.sh    || true
+chmod +x "$BIRDDOG_ROOT"/bdc/*.sh    || true
+chmod +x "$BIRDDOG_ROOT"/mesh/*.sh   || true
 
 if [[ "$SELF_UPDATED" -eq 1 ]]; then
     echo "[Update] Activating new updater"
@@ -167,15 +147,9 @@ if [[ "$SELF_UPDATED" -eq 1 ]]; then
     chmod +x "$BIRDDOG_ROOT/common/script_update.sh"
 fi
 
-# --------------------------------------------------
-# WRITE VERSION IDENTITY
-# --------------------------------------------------
-
 echo "$REMOTE_COMMIT"              > "$COMMIT_FILE"
 echo "commit-$REMOTE_COMMIT"       > "$VERSION_FILE"
 date -u +"%Y-%m-%dT%H:%M:%SZ"     > "$BUILD_FILE"
-
-# --------------------------------------------------
 
 echo ""
 echo "====================================="
@@ -191,3 +165,5 @@ if [[ "$REBOOT_NEEDED" -eq 1 ]]; then
     echo "     sudo reboot"
     echo ""
 fi
+echo "Update log: $LOG"
+echo ""
