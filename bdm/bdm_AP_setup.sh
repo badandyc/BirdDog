@@ -35,12 +35,18 @@ echo "=== Writing network configuration ==="
 mkdir -p /etc/systemd/network
 
 # eth0 — DHCP, management interface (SSH lives here)
+# ClientIdentifier=mac ensures the router gives back the same IP
+# after the NetworkManager → networkd transition (no lease change)
 cat > /etc/systemd/network/10-eth0.network << EOF
 [Match]
 Name=eth0
 
 [Network]
 DHCP=yes
+
+[DHCP]
+ClientIdentifier=mac
+SendHostname=yes
 EOF
 
 # wlan1 — mesh backbone, managed by birddog-mesh.service
