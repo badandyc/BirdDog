@@ -2,7 +2,8 @@
 set -e
 set -o pipefail
 
-LOG="/opt/birddog/logs/golden_image_creation.log"
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+LOG="/opt/birddog/logs/golden_image_creation_${TIMESTAMP}.log"
 
 if [[ "$EUID" -ne 0 ]]; then
     exec sudo -E bash "$0" "$@"
@@ -25,7 +26,7 @@ PRECHECK_NOTES=()
 
 BIRDDOG_ROOT="/opt/birddog"
 
-for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar iw wireless-tools; do
+for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar iw wireless-tools python3-rpi.gpio; do
     if ! dpkg -s "$pkg" >/dev/null 2>&1; then
         PRECHECK_PASS=0
         PRECHECK_NOTES+=("package missing: $pkg")
@@ -50,6 +51,11 @@ fi
 if [[ ! -f /usr/local/bin/mesh ]]; then
     PRECHECK_PASS=0
     PRECHECK_NOTES+=("mesh CLI missing")
+fi
+
+if [[ ! -f /usr/local/bin/birddog_day.py ]]; then
+    PRECHECK_PASS=0
+    PRECHECK_NOTES+=("birddog_day daemon missing")
 fi
 
 # --------------------------------------------------
@@ -118,7 +124,7 @@ if [[ "$BIRDDOG_MODE" == "full" ]]; then
         fi
     }
 
-    for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar iw wireless-tools; do
+    for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar iw wireless-tools python3-rpi.gpio; do
         install_pkg "$pkg"
     done
 
@@ -640,41 +646,292 @@ chmod +x "$BIRDDOG_ROOT"/bdc/*.sh
 chmod +x "$BIRDDOG_ROOT"/mesh/*.sh
 
 # --------------------------------------------------
-# CLI
+# CLI + DAEMON
 # --------------------------------------------------
 
-echo "[Phase 5] Installing BirdDog CLI"
+echo "[Phase 5] Installing BirdDog CLI and birddog_day daemon"
+
+# ── birddog_day.py ──
+
+cat > /usr/local/bin/birddog_day.py <<'BIRDDOG_DAY'
+#!/usr/bin/env python3
+
+# birddog_day — BirdDog hardware status daemon
+# Monitors mesh, stream, and camera state and reflects it on LEDs.
+# Handles button short press (status report) and long press (shutdown).
+# Runs as birddog_day.service — golden image, role independent.
+
+import RPi.GPIO as GPIO
+import time
+import subprocess
+import os
+
+# ── GPIO pin assignments ──
+PIN_LED_BLUE   = 17
+PIN_LED_GREEN  = 27
+PIN_LED_YELLOW = 22
+PIN_LED_RED    = 23
+PIN_BUZZER     = 24
+PIN_BUTTON     = 25
+
+# ── timing ──
+LOOP_RATE        = 0.01   # 10ms main loop
+STATE_INTERVAL   = 3.0    # systemd checks every 3 seconds
+BLINK_INTERVAL   = 0.5    # LED blink toggle interval
+LONG_PRESS_TIME  = 5.0    # seconds to trigger shutdown
+
+# ── state ──
+led_blue_blink   = False
+led_green_blink  = False
+last_state_check = 0
+last_blink_time  = 0
+blink_phase      = False
+button_press_time = None
+
+def setup():
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setwarnings(False)
+    for pin in [PIN_LED_BLUE, PIN_LED_GREEN, PIN_LED_YELLOW, PIN_LED_RED, PIN_BUZZER]:
+        GPIO.setup(pin, GPIO.OUT)
+        GPIO.output(pin, GPIO.LOW)
+    GPIO.setup(PIN_BUTTON, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+
+def all_leds_off():
+    for pin in [PIN_LED_BLUE, PIN_LED_GREEN, PIN_LED_YELLOW, PIN_LED_RED]:
+        GPIO.output(pin, GPIO.LOW)
+
+def beep(pattern):
+    # pattern: list of (on_time, off_time) tuples in seconds
+    for on_t, off_t in pattern:
+        GPIO.output(PIN_BUZZER, GPIO.HIGH)
+        time.sleep(on_t)
+        GPIO.output(PIN_BUZZER, GPIO.LOW)
+        if off_t > 0:
+            time.sleep(off_t)
+
+def boot_beep():
+    beep([(0.1, 0.15), (0.1, 0)])
+
+def shutdown_beep():
+    beep([(1.0, 0)])
+
+def status_beep():
+    beep([(0.1, 0.15), (0.1, 0.15), (0.1, 0)])
+
+def service_active(name):
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", name],
+            capture_output=True, text=True, timeout=3
+        )
+        return result.stdout.strip() == "active"
+    except Exception:
+        return False
+
+def service_activating(name):
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", name],
+            capture_output=True, text=True, timeout=3
+        )
+        return result.stdout.strip() == "activating"
+    except Exception:
+        return False
+
+def mesh_joined():
+    try:
+        result = subprocess.run(
+            ["iw", "dev", "wlan1", "info"],
+            capture_output=True, text=True, timeout=3
+        )
+        return "type mesh point" in result.stdout
+    except Exception:
+        return False
+
+def mesh_has_peer():
+    try:
+        result = subprocess.run(
+            ["iw", "dev", "wlan1", "station", "dump"],
+            capture_output=True, text=True, timeout=3
+        )
+        return "Station" in result.stdout
+    except Exception:
+        return False
+
+def camera_ok():
+    return os.path.exists("/dev/video0") or os.path.exists("/dev/v4l/by-id")
+
+def check_state():
+    global led_blue_blink, led_green_blink
+
+    # ── blue: mesh ──
+    mesh_svc = service_active("birddog-mesh")
+    joined   = mesh_joined()
+    has_peer = mesh_has_peer()
+
+    if not mesh_svc or not joined:
+        # mesh down — off
+        led_blue_blink = False
+        GPIO.output(PIN_LED_BLUE, GPIO.LOW)
+    elif joined and not has_peer:
+        # joined but converging — blink
+        led_blue_blink = True
+    else:
+        # steady with peer — solid
+        led_blue_blink = False
+        GPIO.output(PIN_LED_BLUE, GPIO.HIGH)
+
+    # ── green: stream ──
+    stream_active     = service_active("birddog-stream")
+    stream_activating = service_activating("birddog-stream")
+
+    if stream_activating:
+        # in restart loop — blink
+        led_green_blink = True
+    elif stream_active:
+        # streaming — solid
+        led_green_blink = False
+        GPIO.output(PIN_LED_GREEN, GPIO.HIGH)
+    else:
+        # failed / not running — off
+        led_green_blink = False
+        GPIO.output(PIN_LED_GREEN, GPIO.LOW)
+
+    # ── red: camera ──
+    GPIO.output(PIN_LED_RED, GPIO.LOW if camera_ok() else GPIO.HIGH)
+
+def update_blink(now):
+    global last_blink_time, blink_phase
+    if now - last_blink_time >= BLINK_INTERVAL:
+        blink_phase = not blink_phase
+        last_blink_time = now
+        if led_blue_blink:
+            GPIO.output(PIN_LED_BLUE, GPIO.HIGH if blink_phase else GPIO.LOW)
+        if led_green_blink:
+            GPIO.output(PIN_LED_GREEN, GPIO.HIGH if blink_phase else GPIO.LOW)
+
+def check_button(now):
+    global button_press_time
+    pressed = GPIO.input(PIN_BUTTON) == GPIO.LOW
+
+    if pressed and button_press_time is None:
+        button_press_time = now
+
+    elif pressed and button_press_time is not None:
+        held = now - button_press_time
+        if held >= LONG_PRESS_TIME:
+            # long press — shutdown
+            all_leds_off()
+            GPIO.output(PIN_LED_RED, GPIO.HIGH)
+            shutdown_beep()
+            GPIO.cleanup()
+            os.system("sudo poweroff")
+
+    elif not pressed and button_press_time is not None:
+        held = now - button_press_time
+        if held >= 0.05:  # debounce
+            # short press — status report
+            status_beep()
+        button_press_time = None
+
+def main():
+    global last_state_check
+    setup()
+    boot_beep()
+    check_state()
+    last_state_check = time.time()
+
+    while True:
+        now = time.time()
+
+        check_button(now)
+        update_blink(now)
+
+        if now - last_state_check >= STATE_INTERVAL:
+            check_state()
+            last_state_check = now
+
+        time.sleep(LOOP_RATE)
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        GPIO.cleanup()
+BIRDDOG_DAY
+
+chmod +x /usr/local/bin/birddog_day.py
+echo "  birddog_day.py installed → /usr/local/bin/birddog_day.py"
+
+# ── birddog_day.service ──
+
+cat > /etc/systemd/system/birddog_day.service <<'BIRDDOG_DAY_SVC'
+[Unit]
+Description=BirdDog Hardware Status Daemon
+After=multi-user.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/birddog_day.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+BIRDDOG_DAY_SVC
+
+systemctl daemon-reload
+systemctl enable birddog_day.service
+echo "  birddog_day.service installed and enabled"
+
+# ── BirdDog CLI ──
 
 BIRDDOG_CLI="/usr/local/bin/birddog"
 
-cat > "$BIRDDOG_CLI" <<BIRDDOG_EOF
+cat > "$BIRDDOG_CLI" <<'BIRDDOG_EOF'
 #!/bin/bash
 BIRDDOG_ROOT="/opt/birddog"
 
-case "\$1" in
-    install)    exec sudo bash "\$BIRDDOG_ROOT/common/golden_image_creation.sh" ;;
-    update)     exec sudo bash "\$BIRDDOG_ROOT/common/script_update.sh" ;;
-    configure)  exec sudo bash "\$BIRDDOG_ROOT/common/device_configure.sh" ;;
-    reset)      exec sudo bash "\$BIRDDOG_ROOT/common/oobe_reset.sh" ;;
-    verify)     exec sudo bash "\$BIRDDOG_ROOT/common/verify_node.sh" ;;
+BIRDDOG_ART='
+oooooooooo.   o8o                 .o8  oooooooooo.
+`888'"'"'   `Y8b  `"'"'"'                "888  `888'"'"'   `Y8b
+ 888     888 oooo  oooo d8b  .oooo888   888      888  .ooooo.   .oooooooo
+ 888oooo888'"'"' `888  `888""8P d88'"'"' `888   888oooo888'"'"' d88'"'"' `88b 888'"'"' `88b
+ 888    `88b  888   888     888   888   888    `88b 888   888 888   888
+ 888    .88P  888   888     888   888   888     d88'"'"' 888   888 `88bod8P'"'"'
+o888bood8P'"'"'  o888o d888b    `Y8bod88P" o888bood8P'"'"'   `Y8bod8P'"'"' `8oooooo.
+                                                               d"     YD
+                                                               "Y88888P'"'"'
+'
+
+case "$1" in
+    install)    exec sudo bash "$BIRDDOG_ROOT/common/golden_image_creation.sh" ;;
+    update)     exec sudo bash "$BIRDDOG_ROOT/common/script_update.sh" ;;
+    configure)  exec sudo bash "$BIRDDOG_ROOT/common/device_configure.sh" ;;
+    reset)      exec sudo bash "$BIRDDOG_ROOT/common/oobe_reset.sh" ;;
+    verify)     exec sudo bash "$BIRDDOG_ROOT/common/verify_node.sh" ;;
     radios)
         echo "Radio layout:"
         for IFACE in wlan0 wlan1 wlan2; do
-            if ip link show "\$IFACE" >/dev/null 2>&1; then
-                DRV=\$(readlink /sys/class/net/\$IFACE/device/driver 2>/dev/null | xargs basename 2>/dev/null || echo "unknown")
-                MODE=\$(iw dev "\$IFACE" info 2>/dev/null | awk '/type/ {print \$2}' || echo "unknown")
-                STATE=\$(ip link show "\$IFACE" | grep -oP '(?<=state )\w+' || echo "unknown")
-                printf "  %-6s driver=%-12s mode=%-10s state=%s\n" "\$IFACE" "\$DRV" "\$MODE" "\$STATE"
+            if ip link show "$IFACE" >/dev/null 2>&1; then
+                DRV=$(readlink /sys/class/net/$IFACE/device/driver 2>/dev/null | xargs basename 2>/dev/null || echo "unknown")
+                MODE=$(iw dev "$IFACE" info 2>/dev/null | awk '/type/ {print $2}' || echo "unknown")
+                STATE=$(ip link show "$IFACE" | grep -oP '(?<=state )\w+' || echo "unknown")
+                printf "  %-6s driver=%-12s mode=%-10s state=%s\n" "$IFACE" "$DRV" "$MODE" "$STATE"
             fi
         done
         ;;
     version)
-        COMMIT=\$(cat "\$BIRDDOG_ROOT/version/COMMIT" 2>/dev/null || echo "unknown")
-        BUILD=\$(cat "\$BIRDDOG_ROOT/version/BUILD" 2>/dev/null || echo "unknown")
+        COMMIT=$(cat "$BIRDDOG_ROOT/version/COMMIT" 2>/dev/null || echo "unknown")
+        BUILD=$(cat "$BIRDDOG_ROOT/version/BUILD" 2>/dev/null || echo "unknown")
         echo "BirdDog"
-        echo "  Commit : \$COMMIT"
-        echo "  Built  : \$BUILD"
-        echo "  Host   : \$(hostname)"
+        echo "  Commit : $COMMIT"
+        echo "  Built  : $BUILD"
+        echo "  Host   : $(hostname)"
+        ;;
+    rocks)
+        echo "$BIRDDOG_ART"
         ;;
     ""|help)
         echo ""
@@ -692,7 +949,7 @@ case "\$1" in
         echo ""
         ;;
     *)
-        echo "Unknown command: \$1"
+        echo "Unknown command: $1"
         echo "Run 'birddog help' for usage"
         exit 1
         ;;
@@ -712,6 +969,8 @@ echo "Golden image creation complete"
 printf "  Commit : %s\n" "$REMOTE_COMMIT"
 printf "  Mode   : %s\n" "$BIRDDOG_MODE"
 echo "====================================="
+echo ""
+echo "Install log: $LOG"
 echo ""
 
 if [[ "$BIRDDOG_MODE" == "full" ]]; then
