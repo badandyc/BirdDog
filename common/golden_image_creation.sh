@@ -959,6 +959,19 @@ BIRDDOG_EOF
 chmod +x "$BIRDDOG_CLI"
 echo "  BirdDog CLI installed → $BIRDDOG_CLI"
 
+echo ""
+echo "  Starting birddog_day hardware daemon..."
+
+systemctl daemon-reload
+systemctl enable birddog_day.service
+systemctl restart birddog_day.service
+
+if systemctl is-active --quiet birddog_day.service; then
+    echo "  birddog_day  : running"
+else
+    echo "  WARNING: birddog_day service did not start — check: journalctl -u birddog_day"
+fi
+
 # --------------------------------------------------
 # DONE
 # --------------------------------------------------
