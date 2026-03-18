@@ -894,15 +894,15 @@ cat > "$BIRDDOG_CLI" <<'BIRDDOG_EOF'
 BIRDDOG_ROOT="/opt/birddog"
 
 BIRDDOG_ART='
-oooooooooo.   o8o                 .o8  oooooooooo.
-`888'"'"'   `Y8b  `"'"'"'                "888  `888'"'"'   `Y8b
- 888     888 oooo  oooo d8b  .oooo888   888      888  .ooooo.   .oooooooo
- 888oooo888'"'"' `888  `888""8P d88'"'"' `888   888oooo888'"'"' d88'"'"' `88b 888'"'"' `88b
- 888    `88b  888   888     888   888   888    `88b 888   888 888   888
- 888    .88P  888   888     888   888   888     d88'"'"' 888   888 `88bod8P'"'"'
-o888bood8P'"'"'  o888o d888b    `Y8bod88P" o888bood8P'"'"'   `Y8bod8P'"'"' `8oooooo.
-                                                               d"     YD
-                                                               "Y88888P'"'"'
+oooooooooo.   o8o                 .o8  oooooooooo.                        
+`888'   `Y8b  `"'                "888  `888'   `Y8b                       
+ 888     888 oooo  oooo d8b  .oooo888   888      888  .ooooo.   .oooooooo 
+ 888oooo888' `888  `888""8P d88' `888   888      888 d88' `88b 888' `88b  
+ 888    `88b  888   888     888   888   888      888 888   888 888   888  
+ 888    .88P  888   888     888   888   888     d88' 888   888 `88bod8P'  
+o888bood8P'  o888o d888b    `Y8bod88P" o888bood8P'   `Y8bod8P' `8oooooo.  
+                                                               d"     YD  
+                                                               "Y88888P'  
 '
 
 case "$1" in
