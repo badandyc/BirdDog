@@ -678,7 +678,7 @@ PIN_BUTTON     = 25
 LOOP_RATE        = 0.01   # 10ms main loop
 STATE_INTERVAL   = 3.0    # systemd checks every 3 seconds
 BLINK_INTERVAL   = 0.5    # LED blink toggle interval
-LONG_PRESS_TIME  = 5.0    # seconds to trigger shutdown
+LONG_PRESS_TIME  = 10.0   # seconds to trigger shutdown (5s reserved for future feature)
 
 # ── state ──
 led_blue_blink   = False
@@ -717,6 +717,40 @@ def shutdown_beep():
 
 def status_beep():
     beep([(0.1, 0.15), (0.1, 0.15), (0.1, 0)])
+
+def led_flash(pin, times=3, on_time=0.1, off_time=0.1):
+    for _ in range(times):
+        GPIO.output(pin, GPIO.HIGH)
+        time.sleep(on_time)
+        GPIO.output(pin, GPIO.LOW)
+        time.sleep(off_time)
+
+def status_roll_call():
+    # Save current LED states
+    saved = {}
+    for pin in [PIN_LED_BLUE, PIN_LED_GREEN, PIN_LED_YELLOW, PIN_LED_RED]:
+        saved[pin] = GPIO.input(pin)
+
+    # All off
+    all_leds_off()
+    time.sleep(0.1)
+
+    # Flash each LED in sequence
+    led_flash(PIN_LED_BLUE)
+    time.sleep(0.1)
+    led_flash(PIN_LED_GREEN)
+    time.sleep(0.1)
+    led_flash(PIN_LED_YELLOW)
+    time.sleep(0.1)
+    led_flash(PIN_LED_RED)
+    time.sleep(0.1)
+
+    # 3 quick buzzes
+    status_beep()
+
+    # Restore LED states
+    for pin, state in saved.items():
+        GPIO.output(pin, state)
 
 def service_active(name):
     try:
@@ -830,8 +864,8 @@ def check_button(now):
     elif not pressed and button_press_time is not None:
         held = now - button_press_time
         if held >= 0.05:  # debounce
-            # short press — status report
-            status_beep()
+            # short press — LED roll call + 3 beeps
+            status_roll_call()
         button_press_time = None
 
 def main():
