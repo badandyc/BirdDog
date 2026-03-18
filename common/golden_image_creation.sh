@@ -803,16 +803,17 @@ def check_state():
     global led_blue_blink, led_green_blink
 
     # blue: mesh
-    mesh_svc = service_active("birddog-mesh")
-    joined   = mesh_joined()
-    has_peer = mesh_has_peer()
+    mesh_svc  = service_active("birddog-mesh")
+    wlan1_up  = os.path.exists("/sys/class/net/wlan1")
+    joined    = mesh_joined()
+    has_peer  = mesh_has_peer()
 
-    if not mesh_svc:
-        # service down -- off
+    if not mesh_svc or not wlan1_up:
+        # service down or adapter missing -- off
         led_blue_blink = 0
         GPIO.output(PIN_LED_BLUE, GPIO.LOW)
     elif not joined:
-        # service up but not in mesh mode -- slow blink (joining)
+        # service up, adapter present, not in mesh mode -- slow blink (joining)
         led_blue_blink = 1
     elif not has_peer:
         # in mesh mode but no peer -- fast blink (searching)
