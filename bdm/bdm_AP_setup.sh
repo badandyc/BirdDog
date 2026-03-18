@@ -34,10 +34,38 @@ echo "=== Writing network configuration ==="
 
 mkdir -p /etc/systemd/network
 
-# eth0 — DHCP, management interface (SSH lives here)
-# ClientIdentifier=mac ensures the router gives back the same IP
-# after the NetworkManager → networkd transition (no lease change)
-cat > /etc/systemd/network/10-eth0.network << EOF
+# Grab current eth0 IP before touching any services.
+# We hold it as a temporary static address so networkd keeps
+# the same IP through the NetworkManager → networkd transition.
+# SSH never drops because the address never changes.
+# After networkd is stable we switch back to pure DHCP.
+ETH0_IP=$(ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet )[^/]+' | head -1)
+ETH0_GW=$(ip route show default dev eth0 2>/dev/null | grep -oP '(?<=via )[^ ]+' | head -1)
+ETH0_PREFIX=$(ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet )[0-9.]+/\K[0-9]+' | head -1)
+ETH0_PREFIX=${ETH0_PREFIX:-24}
+
+if [[ -n "$ETH0_IP" && -n "$ETH0_GW" ]]; then
+    echo "  eth0 current IP : $ETH0_IP/$ETH0_PREFIX  gw $ETH0_GW"
+    echo "  Holding IP through transition..."
+
+    cat > /etc/systemd/network/10-eth0.network << EOF
+[Match]
+Name=eth0
+
+[Network]
+Address=${ETH0_IP}/${ETH0_PREFIX}
+Gateway=${ETH0_GW}
+DNS=8.8.8.8
+ConfigureWithoutCarrier=yes
+
+[DHCP]
+ClientIdentifier=mac
+SendHostname=yes
+EOF
+
+else
+    echo "  WARNING: could not detect eth0 IP — falling back to DHCP only"
+    cat > /etc/systemd/network/10-eth0.network << EOF
 [Match]
 Name=eth0
 
@@ -48,6 +76,7 @@ DHCP=yes
 ClientIdentifier=mac
 SendHostname=yes
 EOF
+fi
 
 # wlan1 — mesh backbone, managed by birddog-mesh.service
 # networkd should not touch it — unmanaged here
@@ -104,7 +133,26 @@ networkctl reload 2>/dev/null || true
 networkctl reconfigure eth0 2>/dev/null || true
 
 echo "  systemd-networkd active"
-echo "  NOTE: eth0 DHCP re-acquiring — SSH may briefly drop and reconnect"
+echo "  eth0 holding current IP — SSH connection stable"
+
+# Give networkd a moment to fully take ownership of eth0,
+# then switch to pure DHCP so the lease renews cleanly
+sleep 3
+
+cat > /etc/systemd/network/10-eth0.network << EOF
+[Match]
+Name=eth0
+
+[Network]
+DHCP=yes
+
+[DHCP]
+ClientIdentifier=mac
+SendHostname=yes
+EOF
+
+networkctl reload 2>/dev/null || true
+echo "  eth0 switched to DHCP — lease will renew on next expiry"
 
 # -------------------------------------------------------
 # Phase 4 — Configure wlan2 for AP mode
