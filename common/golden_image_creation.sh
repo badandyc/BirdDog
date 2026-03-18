@@ -677,16 +677,20 @@ PIN_BUTTON     = 25
 # ── timing ──
 LOOP_RATE        = 0.01   # 10ms main loop
 STATE_INTERVAL   = 3.0    # systemd checks every 3 seconds
-BLINK_INTERVAL   = 0.5    # LED blink toggle interval
+BLINK_SLOW       = 0.5    # 1Hz  — joining mesh (service up, not in mesh mode)
+BLINK_FAST       = 0.125  # 4Hz  — in mesh, no peer yet
 LONG_PRESS_TIME  = 10.0   # seconds to trigger shutdown (5s reserved for future feature)
 
 # ── state ──
-led_blue_blink   = False
-led_green_blink  = False
-last_state_check = 0
-last_blink_time  = 0
-blink_phase      = False
-button_press_time = None
+# led_blue_blink: 0=off  1=slow(joining)  2=fast(no peer)  3=solid
+led_blue_blink       = 0
+led_green_blink      = False
+last_state_check     = 0
+last_blink_slow      = 0
+last_blink_fast      = 0
+blink_phase_slow     = False
+blink_phase_fast     = False
+button_press_time    = None
 
 def setup():
     GPIO.setmode(GPIO.BCM)
@@ -798,21 +802,24 @@ def camera_ok():
 def check_state():
     global led_blue_blink, led_green_blink
 
-    # ── blue: mesh ──
+    # blue: mesh
     mesh_svc = service_active("birddog-mesh")
     joined   = mesh_joined()
     has_peer = mesh_has_peer()
 
-    if not mesh_svc or not joined:
-        # mesh down — off
-        led_blue_blink = False
+    if not mesh_svc:
+        # service down -- off
+        led_blue_blink = 0
         GPIO.output(PIN_LED_BLUE, GPIO.LOW)
-    elif joined and not has_peer:
-        # joined but converging — blink
-        led_blue_blink = True
+    elif not joined:
+        # service up but not in mesh mode -- slow blink (joining)
+        led_blue_blink = 1
+    elif not has_peer:
+        # in mesh mode but no peer -- fast blink (searching)
+        led_blue_blink = 2
     else:
-        # steady with peer — solid
-        led_blue_blink = False
+        # mesh joined with peer -- solid
+        led_blue_blink = 3
         GPIO.output(PIN_LED_BLUE, GPIO.HIGH)
 
     # ── green: stream ──
@@ -835,14 +842,23 @@ def check_state():
     GPIO.output(PIN_LED_RED, GPIO.LOW if camera_ok() else GPIO.HIGH)
 
 def update_blink(now):
-    global last_blink_time, blink_phase
-    if now - last_blink_time >= BLINK_INTERVAL:
-        blink_phase = not blink_phase
-        last_blink_time = now
-        if led_blue_blink:
-            GPIO.output(PIN_LED_BLUE, GPIO.HIGH if blink_phase else GPIO.LOW)
+    global last_blink_slow, last_blink_fast, blink_phase_slow, blink_phase_fast
+
+    # slow blink (1Hz)
+    if now - last_blink_slow >= BLINK_SLOW:
+        blink_phase_slow = not blink_phase_slow
+        last_blink_slow = now
+        if led_blue_blink == 1:
+            GPIO.output(PIN_LED_BLUE, GPIO.HIGH if blink_phase_slow else GPIO.LOW)
         if led_green_blink:
-            GPIO.output(PIN_LED_GREEN, GPIO.HIGH if blink_phase else GPIO.LOW)
+            GPIO.output(PIN_LED_GREEN, GPIO.HIGH if blink_phase_slow else GPIO.LOW)
+
+    # fast blink (4Hz)
+    if now - last_blink_fast >= BLINK_FAST:
+        blink_phase_fast = not blink_phase_fast
+        last_blink_fast = now
+        if led_blue_blink == 2:
+            GPIO.output(PIN_LED_BLUE, GPIO.HIGH if blink_phase_fast else GPIO.LOW)
 
 def check_button(now):
     global button_press_time
