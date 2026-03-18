@@ -285,6 +285,12 @@ echo "================================="
 if [[ "$FAIL" -eq 1 ]]; then
     echo "NODE STATUS: FAILED"
     echo "================================="
+    echo ""
+    echo "  Check LEDs on unit:"
+    echo "    Blue  — mesh   (off=down  blink=joining  solid=joined)"
+    echo "    Green — stream (off=failed  blink=restarting  solid=ok)"
+    echo "    Red   — camera (on=fault)"
+    echo ""
     exit 1
 elif [[ "$ROLE" == "UNKNOWN" ]]; then
     echo "NODE STATUS: NOT CONFIGURED"
@@ -294,9 +300,18 @@ elif [[ "$ROLE" == "UNKNOWN" ]]; then
 elif [[ "$WARN" -eq 1 ]]; then
     echo "NODE STATUS: DEGRADED"
     echo "================================="
+    echo ""
+    echo "  Check LEDs on unit:"
+    echo "    Blue  — mesh   (off=down  blink=joining  solid=joined)"
+    echo "    Green — stream (off=failed  blink=restarting  solid=ok)"
+    echo "    Red   — camera (on=fault)"
+    echo ""
     exit 0
 else
     echo "NODE STATUS: OPERATIONAL"
     echo "================================="
+    echo ""
+    echo "  All systems nominal — LEDs should show blue + green solid"
+    echo ""
     exit 0
 fi
