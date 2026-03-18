@@ -885,6 +885,23 @@ systemctl daemon-reload
 systemctl enable birddog_day.service
 echo "  birddog_day.service installed and enabled"
 
+# ── BirdDog ASCII art ──
+# Written as a plain file to avoid quoting issues inside heredocs
+
+cat > /usr/local/bin/birddog_art <<'BIRDDOG_ART'
+oooooooooo.   o8o                 .o8  oooooooooo.
+`888'   `Y8b  `"'                "888  `888'   `Y8b
+ 888     888 oooo  oooo d8b  .oooo888   888      888  .ooooo.   .oooooooo
+ 888oooo888' `888  `888""8P d88' `888   888oooo888' d88' `88b 888' `88b
+ 888    `88b  888   888     888   888   888    `88b 888   888 888   888
+ 888    .88P  888   888     888   888   888     d88' 888   888 `88bod8P'
+o888bood8P'  o888o d888b    `Y8bod88P" o888bood8P'   `Y8bod8P' `8oooooo.
+                                                               d"     YD
+                                                               "Y88888P'
+BIRDDOG_ART
+
+echo "  birddog_art installed → /usr/local/bin/birddog_art"
+
 # ── BirdDog CLI ──
 
 BIRDDOG_CLI="/usr/local/bin/birddog"
@@ -892,18 +909,6 @@ BIRDDOG_CLI="/usr/local/bin/birddog"
 cat > "$BIRDDOG_CLI" <<'BIRDDOG_EOF'
 #!/bin/bash
 BIRDDOG_ROOT="/opt/birddog"
-
-BIRDDOG_ART='
-oooooooooo.   o8o                 .o8  oooooooooo.                        
-`888'   `Y8b  `"'                "888  `888'   `Y8b                       
- 888     888 oooo  oooo d8b  .oooo888   888      888  .ooooo.   .oooooooo 
- 888oooo888' `888  `888""8P d88' `888   888      888 d88' `88b 888' `88b  
- 888    `88b  888   888     888   888   888      888 888   888 888   888  
- 888    .88P  888   888     888   888   888     d88' 888   888 `88bod8P'  
-o888bood8P'  o888o d888b    `Y8bod88P" o888bood8P'   `Y8bod8P' `8oooooo.  
-                                                               d"     YD  
-                                                               "Y88888P'  
-'
 
 case "$1" in
     install)    exec sudo bash "$BIRDDOG_ROOT/common/golden_image_creation.sh" ;;
@@ -931,7 +936,7 @@ case "$1" in
         echo "  Host   : $(hostname)"
         ;;
     rocks)
-        echo "$BIRDDOG_ART"
+        cat /usr/local/bin/birddog_art
         ;;
     ""|help)
         echo ""
