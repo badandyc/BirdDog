@@ -98,8 +98,7 @@ done
 
 # -------------------------------------------------------
 # Step 3 — Clear runtime state
-# Preserve: scripts, mediamtx binary, version info, birddog CLI,
-#           birddog_day.py, birddog_day.service (golden image — role independent)
+# Preserve: scripts, mediamtx binary, version info, birddog CLI
 # -------------------------------------------------------
 
 step "Clearing runtime state"
@@ -233,7 +232,7 @@ done
 
 echo ""
 echo "  Services:"
-for SVC in birddog-mesh birddog-stream mediamtx hostapd dnsmasq nginx birddog_day; do
+for SVC in birddog-mesh birddog-stream mediamtx hostapd dnsmasq nginx; do
     STATE=$(systemctl is-enabled "${SVC}.service" 2>/dev/null || true)
     [[ -z "$STATE" ]] && STATE="not-found"
     if [[ "$SVC" == "dnsmasq" || "$SVC" == "nginx" ]] && [[ "$STATE" == "enabled" ]]; then
@@ -241,9 +240,6 @@ for SVC in birddog-mesh birddog-stream mediamtx hostapd dnsmasq nginx birddog_da
     fi
     if [[ "$SVC" == "hostapd" ]] && [[ "$STATE" == "masked" ]]; then
         STATE="masked (by design)"
-    fi
-    if [[ "$SVC" == "birddog_day" ]] && [[ "$STATE" == "enabled" ]]; then
-        STATE="enabled (by design — golden image)"
     fi
     echo "    ${SVC}  →  $STATE"
 done
