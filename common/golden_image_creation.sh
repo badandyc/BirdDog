@@ -641,7 +641,9 @@ echo "[Phase 4] Permissions"
 chmod +x "$BIRDDOG_ROOT"/common/*.sh
 chmod +x "$BIRDDOG_ROOT"/bdm/*.sh
 chmod +x "$BIRDDOG_ROOT"/bdc/*.sh
-chmod +x "$BIRDDOG_ROOT"/mesh/*.sh
+shopt -s nullglob
+for f in "$BIRDDOG_ROOT"/mesh/*.sh; do chmod +x "$f"; done
+shopt -u nullglob
 
 # --------------------------------------------------
 # CLI + DAEMON
