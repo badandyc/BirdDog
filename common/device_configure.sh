@@ -120,15 +120,19 @@ if [[ "$ROLE" == "bdc" ]]; then
 fi
 echo ""
 
-read -r -p "  Accept? (y/n/override): " CONFIRM
+echo "  [Y]es  accept proposed configuration"
+echo "  [N]o   abort"
+echo "  [OVERRIDE]  manually enter node number"
+echo ""
+read -r -p "  Choice: " CONFIRM
 
-if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
+if [[ "$CONFIRM" == "Y" ]]; then
     HOSTNAME_INPUT="$AUTO_HOSTNAME"
     MESH_IP="$AUTO_MESH_IP"
     NODE_NUM="$AUTO_NODE"
     STREAM_NAME="$AUTO_STREAM"
 
-elif [[ "$CONFIRM" == "override" ]]; then
+elif [[ "$CONFIRM" == "OVERRIDE" ]]; then
     echo ""
     while true; do
         read -r -p "  Enter hostname (${ROLE}-##): " HOSTNAME_INPUT
@@ -148,9 +152,12 @@ elif [[ "$CONFIRM" == "override" ]]; then
         MESH_IP="10.10.20.$((10#$NODE_NUM * 10))"
     fi
 
-else
+elif [[ "$CONFIRM" == "N" ]]; then
     echo "  Aborted."
     exit 0
+else
+    echo "  Invalid selection — aborted."
+    exit 1
 fi
 
 echo ""
@@ -271,7 +278,18 @@ echo "-------------------------------------"
 echo "Phase 6 — Mesh"
 echo "-------------------------------------"
 
-bash "$BIRDDOG_ROOT/mesh/add_mesh_network.sh" "$HOSTNAME_INPUT"
+# Write mesh.conf — runtime script reads this for the committed mesh IP
+# This replaces the bootstrap temp IP with the node permanent IP
+mkdir -p "$BIRDDOG_ROOT/mesh"
+
+cat > "$BIRDDOG_ROOT/mesh/mesh.conf" << EOF
+MESH_IP="${MESH_IP}/24"
+EOF
+
+echo "  mesh.conf written — IP: $MESH_IP/24"
+
+# Restart mesh service so it picks up the committed IP immediately
+systemctl restart birddog-mesh.service
 
 echo "  Waiting for mesh service to start..."
 sleep 5
