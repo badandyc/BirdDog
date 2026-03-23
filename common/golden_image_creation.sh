@@ -1041,7 +1041,7 @@ cat > /usr/local/bin/birddog-mesh-join.sh <<'MESH_RUNTIME'
 # BirdDog Mesh Runtime
 # Manages 802.11s mesh membership on wlan1.
 # Reads mesh IP from /opt/birddog/mesh/mesh.conf at startup.
-# Falls back to random bootstrap IP (10.10.20.240-254) if unconfigured.
+# Falls back to random bootstrap IP (10.10.20.231-254) if unconfigured.
 # Runs as birddog-mesh.service (systemd).
 
 LOG="/opt/birddog/mesh/mesh_runtime.log"
@@ -1052,7 +1052,7 @@ if [[ -f "$MESH_CONF" ]]; then
     source "$MESH_CONF"
 else
     # Bootstrap — no identity yet, pick random temp IP
-    OCTET=$(( RANDOM % 15 + 240 ))
+    OCTET=$(( RANDOM % 24 + 231 ))
     MESH_IP="10.10.20.${OCTET}/24"
 fi
 
