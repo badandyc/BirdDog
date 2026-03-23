@@ -29,12 +29,17 @@ echo "Phase 1 — Role Detection"
 echo "-------------------------------------"
 
 # Read GPIO 5 using sysfs — no Python dependency needed here
-# Export pin, set as input with pull-up, read value
+# Export pin if not already exported, suppress all errors cleanly
 if [[ ! -d /sys/class/gpio/gpio${GPIO_SWITCH} ]]; then
     echo "${GPIO_SWITCH}" > /sys/class/gpio/export 2>/dev/null || true
-    sleep 0.1
+    sleep 0.2
 fi
-echo "in" > /sys/class/gpio/gpio${GPIO_SWITCH}/direction 2>/dev/null || true
+
+# Set direction only if the file exists — avoids noise on kernels
+# that auto-configure the pin direction
+if [[ -f /sys/class/gpio/gpio${GPIO_SWITCH}/direction ]]; then
+    echo "in" > /sys/class/gpio/gpio${GPIO_SWITCH}/direction 2>/dev/null || true
+fi
 
 GPIO_VAL=$(cat /sys/class/gpio/gpio${GPIO_SWITCH}/value 2>/dev/null || echo "1")
 
