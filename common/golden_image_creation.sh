@@ -657,13 +657,14 @@ cat > /usr/local/bin/birddog_day.py <<'BIRDDOG_DAY'
 
 # birddog_day — BirdDog hardware status daemon
 # Monitors mesh, stream, and camera state and reflects it on LEDs.
-# Handles button short press (status report) and long press (shutdown).
+# Handles button interactions and role switch detection.
 # Runs as birddog_day.service — golden image, role independent.
 
 import RPi.GPIO as GPIO
 import time
 import subprocess
 import os
+import random
 
 # ── GPIO pin assignments ──
 PIN_LED_BLUE   = 17
@@ -672,13 +673,16 @@ PIN_LED_YELLOW = 22
 PIN_LED_RED    = 23
 PIN_BUZZER     = 24
 PIN_BUTTON     = 25
+PIN_SWITCH     = 5   # role switch: open=BDM, closed=BDC
 
 # ── timing ──
 LOOP_RATE        = 0.01   # 10ms main loop
 STATE_INTERVAL   = 3.0    # systemd checks every 3 seconds
 BLINK_SLOW       = 0.5    # 1Hz  — joining mesh (service up, not in mesh mode)
 BLINK_FAST       = 0.125  # 4Hz  — in mesh, no peer yet
-LONG_PRESS_TIME  = 10.0   # seconds to trigger shutdown (5s reserved for future feature)
+PRESS_SHORT      = 1.0    # 1s release — TBD
+PRESS_ROLL_CALL  = 5.0    # 5s hold — LED roll call
+LONG_PRESS_TIME  = 10.0   # 10s hold — shutdown
 
 # ── state ──
 # led_blue_blink: 0=off  1=slow(joining)  2=fast(no peer)  3=solid
@@ -690,6 +694,7 @@ last_blink_fast      = 0
 blink_phase_slow     = False
 blink_phase_fast     = False
 button_press_time    = None
+roll_call_fired      = False  # track if roll call already fired during this hold
 
 def setup():
     GPIO.setmode(GPIO.BCM)
@@ -698,6 +703,7 @@ def setup():
         GPIO.setup(pin, GPIO.OUT)
         GPIO.output(pin, GPIO.LOW)
     GPIO.setup(PIN_BUTTON, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(PIN_SWITCH, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 def all_leds_off():
     for pin in [PIN_LED_BLUE, PIN_LED_GREEN, PIN_LED_YELLOW, PIN_LED_RED]:
@@ -720,6 +726,30 @@ def shutdown_beep():
 
 def status_beep():
     beep([(0.1, 0.15), (0.1, 0.15), (0.1, 0)])
+
+def role_beep_bdc():
+    # 1 long tone — BDC confirmed
+    beep([(0.8, 0)])
+
+def role_beep_bdm():
+    # 2 long tones — BDM confirmed
+    beep([(0.8, 0.3), (0.8, 0)])
+
+def sos_beep():
+    # SOS x2 — switch/config mismatch
+    dot = 0.1
+    dash = 0.3
+    gap = 0.1
+    letter_gap = 0.3
+    word_gap = 0.6
+    sos = [
+        (dot, gap), (dot, gap), (dot, letter_gap),   # S
+        (dash, gap), (dash, gap), (dash, letter_gap), # O
+        (dot, gap), (dot, gap), (dot, word_gap),      # S
+    ]
+    beep(sos)
+    time.sleep(0.3)
+    beep(sos)
 
 def led_flash(pin, times=3, on_time=0.1, off_time=0.1):
     for _ in range(times):
@@ -754,6 +784,30 @@ def status_roll_call():
     # Restore LED states
     for pin, state in saved.items():
         GPIO.output(pin, state)
+
+def read_role():
+    # open (high) = BDM, closed (low) = BDC
+    return "bdm" if GPIO.input(PIN_SWITCH) == GPIO.HIGH else "bdc"
+
+def committed_role():
+    # Read committed role from hostname
+    try:
+        host = open('/etc/hostname').read().strip()
+        if host.startswith('bdm-'):
+            return 'bdm'
+        elif host.startswith('bdc-'):
+            return 'bdc'
+    except Exception:
+        pass
+    return None
+
+def is_bootstrap():
+    # Node is in bootstrap state if hostname is unconfigured
+    try:
+        host = open('/etc/hostname').read().strip()
+        return not (host.startswith('bdm-') or host.startswith('bdc-'))
+    except Exception:
+        return True
 
 def service_active(name):
     try:
@@ -801,7 +855,18 @@ def camera_ok():
 def check_state():
     global led_blue_blink, led_green_blink
 
-    # blue: mesh
+    # ── yellow: bootstrap / mismatch ──
+    bootstrap = is_bootstrap()
+    role_sw   = read_role()
+    role_cfg  = committed_role()
+    mismatch  = (not bootstrap) and (role_cfg is not None) and (role_sw != role_cfg)
+
+    if bootstrap or mismatch:
+        GPIO.output(PIN_LED_YELLOW, GPIO.HIGH)
+    else:
+        GPIO.output(PIN_LED_YELLOW, GPIO.LOW)
+
+    # ── blue: mesh ──
     mesh_svc  = service_active("birddog-mesh")
     wlan1_up  = os.path.exists("/sys/class/net/wlan1")
     joined    = mesh_joined()
@@ -827,14 +892,11 @@ def check_state():
     stream_activating = service_activating("birddog-stream")
 
     if stream_activating:
-        # in restart loop — blink
         led_green_blink = True
     elif stream_active:
-        # streaming — solid
         led_green_blink = False
         GPIO.output(PIN_LED_GREEN, GPIO.HIGH)
     else:
-        # failed / not running — off
         led_green_blink = False
         GPIO.output(PIN_LED_GREEN, GPIO.LOW)
 
@@ -861,16 +923,23 @@ def update_blink(now):
             GPIO.output(PIN_LED_BLUE, GPIO.HIGH if blink_phase_fast else GPIO.LOW)
 
 def check_button(now):
-    global button_press_time
+    global button_press_time, roll_call_fired
     pressed = GPIO.input(PIN_BUTTON) == GPIO.LOW
 
     if pressed and button_press_time is None:
         button_press_time = now
+        roll_call_fired = False
 
     elif pressed and button_press_time is not None:
         held = now - button_press_time
+
+        # 5s hold — fire roll call once
+        if held >= PRESS_ROLL_CALL and not roll_call_fired:
+            status_roll_call()
+            roll_call_fired = True
+
+        # 10s hold — shutdown
         if held >= LONG_PRESS_TIME:
-            # long press — shutdown
             all_leds_off()
             GPIO.output(PIN_LED_RED, GPIO.HIGH)
             shutdown_beep()
@@ -879,15 +948,39 @@ def check_button(now):
 
     elif not pressed and button_press_time is not None:
         held = now - button_press_time
-        if held >= 0.05:  # debounce
-            # short press — LED roll call + 3 beeps
-            status_roll_call()
+        if held >= 0.05 and held < PRESS_ROLL_CALL:
+            # short press under 5s — TBD
+            pass
         button_press_time = None
+        roll_call_fired = False
+
+def boot_sequence():
+    role_sw  = read_role()
+    bootstrap = is_bootstrap()
+    role_cfg  = committed_role()
+    mismatch  = (not bootstrap) and (role_cfg is not None) and (role_sw != role_cfg)
+
+    if mismatch:
+        # switch/config mismatch — yellow on, SOS x2, safe state
+        GPIO.output(PIN_LED_YELLOW, GPIO.HIGH)
+        sos_beep()
+    elif bootstrap:
+        # never configured — yellow on, boot beep
+        GPIO.output(PIN_LED_YELLOW, GPIO.HIGH)
+        boot_beep()
+    else:
+        # configured and switch matches — role confirmation beep
+        boot_beep()
+        time.sleep(0.3)
+        if role_sw == "bdc":
+            role_beep_bdc()
+        else:
+            role_beep_bdm()
 
 def main():
     global last_state_check
     setup()
-    boot_beep()
+    boot_sequence()
     check_state()
     last_state_check = time.time()
 
@@ -910,6 +1003,7 @@ if __name__ == "__main__":
         pass
     finally:
         GPIO.cleanup()
+
 BIRDDOG_DAY
 
 chmod +x /usr/local/bin/birddog_day.py
