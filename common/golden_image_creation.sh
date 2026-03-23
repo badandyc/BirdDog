@@ -620,7 +620,6 @@ fetch_file bdm/bdm_AP_setup.sh              "$BIRDDOG_ROOT/bdm/bdm_AP_setup.sh"
 fetch_file bdm/bdm_mediamtx_setup.sh        "$BIRDDOG_ROOT/bdm/bdm_mediamtx_setup.sh"
 fetch_file bdm/bdm_web_setup.sh             "$BIRDDOG_ROOT/bdm/bdm_web_setup.sh"
 fetch_file bdc/bdc_fresh_install_setup.sh   "$BIRDDOG_ROOT/bdc/bdc_fresh_install_setup.sh"
-fetch_file mesh/add_mesh_network.sh         "$BIRDDOG_ROOT/mesh/add_mesh_network.sh"
 
 if [[ "$FETCH_FAILED" -eq 1 ]]; then
     echo ""
@@ -1028,6 +1027,277 @@ BIRDDOG_DAY_SVC
 systemctl daemon-reload
 systemctl enable birddog_day.service
 echo "  birddog_day.service installed and enabled"
+
+# ── birddog-mesh-join.sh + service ──
+
+LOG_DIR="/opt/birddog/mesh"
+mkdir -p "$LOG_DIR"
+
+cat > /usr/local/bin/birddog-mesh-join.sh <<'MESH_RUNTIME'
+#!/bin/bash
+
+# BirdDog Mesh Runtime
+# Manages 802.11s mesh membership on wlan1.
+# Reads mesh IP from /opt/birddog/mesh/mesh.conf at startup.
+# Falls back to random bootstrap IP (10.10.20.240-254) if unconfigured.
+# Runs as birddog-mesh.service (systemd).
+
+LOG="/opt/birddog/mesh/mesh_runtime.log"
+MESH_CONF="/opt/birddog/mesh/mesh.conf"
+
+# ── Determine mesh IP ──
+if [[ -f "$MESH_CONF" ]]; then
+    source "$MESH_CONF"
+else
+    # Bootstrap — no identity yet, pick random temp IP
+    OCTET=$(( RANDOM % 15 + 240 ))
+    MESH_IP="10.10.20.${OCTET}/24"
+fi
+
+MESH_IP="${MESH_IP:-10.10.20.254/24}"
+
+# State machine states:
+#   WAIT_INTERFACE  wlan1 not yet visible
+#   NORMALIZE       first join attempt in progress
+#   CONVERGING      joined, waiting for first peer
+#   STEADY          peer seen recently
+#   SUSPECT         no peer for SUSPECT_THRESHOLD seconds
+#   RECOVERY        no peer for RECOVERY_THRESHOLD seconds — rejoin
+
+STATE="INIT"
+LAST_PEER_TIME=0
+LAST_JOIN_TIME=0
+
+JOIN_COOLDOWN=15
+SUSPECT_THRESHOLD=15
+RECOVERY_THRESHOLD=40
+
+log() {
+    echo "[$(date '+%H:%M:%S')] [mesh] $1" >> "$LOG"
+}
+
+log_state() {
+    log "STATE → $1"
+}
+
+interface_exists() {
+    ip link show wlan1 >/dev/null 2>&1
+}
+
+mesh_joined() {
+    iw dev wlan1 info 2>/dev/null | grep -q "type mesh point"
+}
+
+assign_ip_if_missing() {
+    if ! ip addr show wlan1 2>/dev/null | grep -q "$MESH_IP"; then
+        ip addr replace "$MESH_IP" dev wlan1 >> "$LOG" 2>&1 || true
+        log "mesh IP restored: $MESH_IP"
+    fi
+}
+
+normalize_and_join() {
+    local NOW
+    NOW=$(date +%s)
+
+    if (( NOW - LAST_JOIN_TIME < JOIN_COOLDOWN )); then
+        log "join cooldown active — skipping"
+        return
+    fi
+
+    log "normalize + join attempt"
+
+    ip link set wlan1 down >> "$LOG" 2>&1 || true
+    sleep 1
+
+    iw dev wlan1 set type mp >> "$LOG" 2>&1 || {
+        log "ERROR: could not set wlan1 to mesh point mode"
+        return 1
+    }
+
+    iw dev wlan1 set power_save off >> "$LOG" 2>&1 || true
+    ip link set wlan1 up >> "$LOG" 2>&1 || true
+    sleep 1
+
+    iw dev wlan1 set channel 1 HT20 >> "$LOG" 2>&1 || true
+
+    iw dev wlan1 mesh join birddog-mesh freq 2412 HT20 >> "$LOG" 2>&1 || {
+        log "mesh join failed — will retry"
+        sleep $(( RANDOM % 4 + 2 ))
+        LAST_JOIN_TIME=$(date +%s)
+        return 1
+    }
+
+    ip addr replace "$MESH_IP" dev wlan1 >> "$LOG" 2>&1 || true
+
+    # Set RSSI threshold — reject direct peers weaker than -65 dBm
+    iw dev wlan1 set mesh_param mesh_rssi_threshold -65 >> "$LOG" 2>&1 || true
+
+    LAST_JOIN_TIME=$(date +%s)
+    log "join successful — IP: $MESH_IP"
+}
+
+check_for_peer() {
+    local PEER_FOUND=0
+
+    if ip neigh show dev wlan1 2>/dev/null | grep -qv "FAILED"; then
+        PEER_FOUND=1
+    else
+        local OWN_OCTET
+        OWN_OCTET=$(echo "$MESH_IP" | cut -d/ -f1 | awk -F. '{print $4}')
+        local OWN_NUM=$(( OWN_OCTET / 10 ))
+
+        for delta in -1 1 -2 2 -3 3; do
+            local SLOT=$(( OWN_NUM + delta ))
+            [[ "$SLOT" -lt 1 || "$SLOT" -gt 25 ]] && continue
+            local TARGET="10.10.20.$((SLOT * 10))"
+            ping -c1 -W1 "$TARGET" >/dev/null 2>&1 || true
+            if ip neigh show dev wlan1 2>/dev/null | grep -q "$TARGET"; then
+                PEER_FOUND=1
+                break
+            fi
+        done
+    fi
+
+    echo "$PEER_FOUND"
+}
+
+# ── Main loop ──
+
+log "================================="
+log "Mesh runtime start"
+log "Hostname : $(hostname)"
+log "Mesh IP  : $MESH_IP"
+
+# Disable dhcpcd — we manage wlan1 addressing manually
+systemctl stop dhcpcd.service 2>/dev/null || true
+systemctl disable dhcpcd.service 2>/dev/null || true
+
+sleep 5
+
+STATE="WAIT_INTERFACE"
+log_state "$STATE"
+
+while true; do
+
+    # ---------- WAIT_INTERFACE ----------
+    if ! interface_exists; then
+        if [[ "$STATE" != "WAIT_INTERFACE" ]]; then
+            STATE="WAIT_INTERFACE"
+            log_state "$STATE"
+        fi
+        sleep 2
+        continue
+    fi
+
+    # ---------- FIRST JOIN ----------
+    if [[ "$STATE" == "WAIT_INTERFACE" ]]; then
+        STATE="NORMALIZE"
+        log_state "$STATE"
+        normalize_and_join || true
+        STATE="CONVERGING"
+        log_state "$STATE"
+    fi
+
+    # ---------- HARD CORRECTNESS CHECK ----------
+    if ! mesh_joined; then
+        log "mesh membership lost"
+        STATE="RECOVERY"
+        log_state "$STATE"
+    fi
+
+    assign_ip_if_missing
+
+    # ---------- PEER DETECTION ----------
+    PEER_FOUND=$(check_for_peer)
+
+    NOW=$(date +%s)
+
+    if [[ "$PEER_FOUND" -eq 1 && "$LAST_PEER_TIME" -eq 0 ]]; then
+        LAST_PEER_TIME=$NOW
+    fi
+
+    DELTA=0
+    [[ "$LAST_PEER_TIME" -gt 0 ]] && DELTA=$(( NOW - LAST_PEER_TIME ))
+
+    if [[ "$PEER_FOUND" -eq 1 ]]; then
+        LAST_PEER_TIME=$NOW
+    fi
+
+    # ---------- STATE MACHINE ----------
+    case "$STATE" in
+
+        CONVERGING)
+            if [[ "$PEER_FOUND" -eq 1 ]]; then
+                STATE="STEADY"
+                log_state "$STATE"
+            fi
+            ;;
+
+        STEADY)
+            if (( DELTA > SUSPECT_THRESHOLD )); then
+                STATE="SUSPECT"
+                log_state "$STATE"
+            fi
+            ;;
+
+        SUSPECT)
+            if [[ "$PEER_FOUND" -eq 1 ]]; then
+                STATE="STEADY"
+                log_state "$STATE"
+            elif (( DELTA > RECOVERY_THRESHOLD )); then
+                STATE="RECOVERY"
+                log_state "$STATE"
+            fi
+            ;;
+
+        RECOVERY)
+            normalize_and_join || true
+            STATE="CONVERGING"
+            log_state "$STATE"
+            ;;
+
+    esac
+
+    # ---------- SLEEP BY STATE ----------
+    case "$STATE" in
+        CONVERGING) sleep 2  ;;
+        SUSPECT)    sleep 5  ;;
+        STEADY)
+            while IFS= read -r line; do
+                PEER_IP=$(echo "$line" | awk '{print $1}')
+                [[ -n "$PEER_IP" ]] && ping -c1 -W1 "$PEER_IP" >/dev/null 2>&1 || true
+            done < <(ip neigh show dev wlan1 2>/dev/null | grep -v FAILED)
+            sleep $(( 30 + RANDOM % 5 ))
+            ;;
+        *)          sleep 5  ;;
+    esac
+
+done
+MESH_RUNTIME
+
+chmod +x /usr/local/bin/birddog-mesh-join.sh
+echo "  birddog-mesh-join.sh installed → /usr/local/bin/birddog-mesh-join.sh"
+
+cat > /etc/systemd/system/birddog-mesh.service << 'MESH_SVC'
+[Unit]
+Description=BirdDog Mesh Runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/birddog-mesh-join.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+MESH_SVC
+
+systemctl daemon-reload
+systemctl enable birddog-mesh.service
+echo "  birddog-mesh.service installed and enabled"
+
 
 # ── BirdDog ASCII art ──
 # Written as a plain file to avoid quoting issues inside heredocs
