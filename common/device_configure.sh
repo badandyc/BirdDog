@@ -20,6 +20,61 @@ REUSE_ALL=0
 GPIO_SWITCH=5
 
 # -------------------------------------------------------
+# Phase 0 — Existing configuration check
+# -------------------------------------------------------
+
+echo ""
+echo "-------------------------------------"
+echo "Phase 0 — Existing Configuration Check"
+echo "-------------------------------------"
+
+CURRENT_HOST=$(hostname)
+MESH_CONF="$BIRDDOG_ROOT/mesh/mesh.conf"
+
+if [[ "$CURRENT_HOST" =~ ^bd[cm]-[0-9]{2}$ && -f "$MESH_CONF" ]]; then
+
+    source "$MESH_CONF"
+    CURRENT_ROLE=$(echo "$CURRENT_HOST" | cut -d- -f1)
+    CURRENT_NODE=$(echo "$CURRENT_HOST" | cut -d- -f2)
+
+    echo ""
+    echo "  Existing configuration detected:"
+    echo "    Hostname : $CURRENT_HOST"
+    echo "    Role     : $CURRENT_ROLE"
+    echo "    Mesh IP  : $MESH_IP"
+    echo ""
+    echo "  [K]eep current configuration"
+    echo "  [R]econfigure"
+    echo "  [N]o / abort"
+    echo ""
+    read -r -p "  Choice: " KEEP_CHOICE
+
+    if [[ "$KEEP_CHOICE" == "K" ]]; then
+        echo ""
+        echo "  Keeping existing configuration — no changes made."
+        echo ""
+        echo "====================================="
+        echo "Device configuration complete"
+        echo "  Hostname : $CURRENT_HOST"
+        echo "  Role     : $CURRENT_ROLE"
+        echo "  Mesh IP  : $MESH_IP"
+        echo "====================================="
+        exit 0
+    elif [[ "$KEEP_CHOICE" == "N" ]]; then
+        echo "  Aborted."
+        exit 0
+    elif [[ "$KEEP_CHOICE" == "R" ]]; then
+        echo "  Proceeding with reconfiguration..."
+    else
+        echo "  Invalid selection — aborted."
+        exit 1
+    fi
+
+else
+    echo "  No existing configuration detected — proceeding with fresh configure"
+fi
+
+# -------------------------------------------------------
 # Phase 1 — Role detection via hardware switch
 # -------------------------------------------------------
 
