@@ -633,8 +633,13 @@ echo "commit-$REMOTE_COMMIT" > "$VERSION_FILE"
 date -u +"%Y-%m-%dT%H:%M:%SZ" > "$BUILD_FILE"
 
 # --------------------------------------------------
-# PERMS
+# PERMS + CLI + DAEMON (full install only)
+# Refresh mode stops after Phase 3 — scripts are already
+# fetched and up to date, no need to reinstall daemons
+# or bounce running services on a live node.
 # --------------------------------------------------
+
+if [[ "$BIRDDOG_MODE" == "full" ]]; then
 
 echo "[Phase 4] Permissions"
 
@@ -1392,6 +1397,8 @@ if systemctl is-active --quiet birddog_day.service; then
 else
     echo "  WARNING: birddog_day service did not start — check: journalctl -u birddog_day"
 fi
+
+fi  # end full install only
 
 # --------------------------------------------------
 # DONE
