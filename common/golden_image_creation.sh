@@ -613,7 +613,6 @@ fetch_file() {
 }
 
 fetch_file common/golden_image_creation.sh  "$BIRDDOG_ROOT/common/golden_image_creation.sh"
-fetch_file common/script_update.sh          "$BIRDDOG_ROOT/common/script_update.sh"
 fetch_file common/device_configure.sh       "$BIRDDOG_ROOT/common/device_configure.sh"
 fetch_file common/oobe_reset.sh             "$BIRDDOG_ROOT/common/oobe_reset.sh"
 fetch_file common/verify_node.sh            "$BIRDDOG_ROOT/common/verify_node.sh"
@@ -963,7 +962,7 @@ BIRDDOG_ROOT="/opt/birddog"
 
 case "$1" in
     install)    exec sudo bash "$BIRDDOG_ROOT/common/golden_image_creation.sh" ;;
-    update)     exec sudo bash "$BIRDDOG_ROOT/common/script_update.sh" ;;
+    update)     exec sudo BIRDDOG_MODE="refresh" bash "$BIRDDOG_ROOT/common/golden_image_creation.sh" ;;
     configure)  exec sudo bash "$BIRDDOG_ROOT/common/device_configure.sh" ;;
     reset)      exec sudo bash "$BIRDDOG_ROOT/common/oobe_reset.sh" ;;
     verify)     exec sudo bash "$BIRDDOG_ROOT/common/verify_node.sh" ;;
