@@ -15,70 +15,142 @@ BDC_CONFIG="$BIRDDOG_ROOT/bdc/bdc.conf"
 CURRENT_HOST=$(hostname)
 REUSE_ALL=0
 
+# GPIO pin for role switch (BCM numbering)
+# open (high) = BDM, closed (low) = BDC
+GPIO_SWITCH=5
+
 # -------------------------------------------------------
-# Phase 1 — Existing configuration check
+# Phase 1 — Role detection via hardware switch
 # -------------------------------------------------------
 
 echo ""
 echo "-------------------------------------"
-echo "Phase 1 — Existing Configuration Check"
+echo "Phase 1 — Role Detection"
 echo "-------------------------------------"
 
-if [[ "$CURRENT_HOST" =~ ^bdc-[0-9]{2}$ && -f "$BDC_CONFIG" ]]; then
+# Read GPIO 5 using sysfs — no Python dependency needed here
+# Export pin, set as input with pull-up, read value
+if [[ ! -d /sys/class/gpio/gpio${GPIO_SWITCH} ]]; then
+    echo "${GPIO_SWITCH}" > /sys/class/gpio/export 2>/dev/null || true
+    sleep 0.1
+fi
+echo "in" > /sys/class/gpio/gpio${GPIO_SWITCH}/direction 2>/dev/null || true
 
-    source "$BDC_CONFIG"
+GPIO_VAL=$(cat /sys/class/gpio/gpio${GPIO_SWITCH}/value 2>/dev/null || echo "1")
 
-    if [[ -n "$BDM_HOST" ]]; then
-        echo ""
-        echo "Existing BDC configuration detected:"
-        echo "  BDC Hostname : $CURRENT_HOST"
-        echo "  BDM Host     : $BDM_HOST"
-        echo "  Stream Name  : $STREAM_NAME"
-        echo ""
-
-        read -r -p "Keep existing settings? (y/n): " KEEP_ALL
-
-        if [[ "$KEEP_ALL" =~ ^[Yy]$ ]]; then
-            HOSTNAME_INPUT="$CURRENT_HOST"
-            REUSE_ALL=1
-        fi
-    fi
-
+if [[ "$GPIO_VAL" == "1" ]]; then
+    ROLE="bdm"
+    echo "  Switch position : OPEN → BDM"
+else
+    ROLE="bdc"
+    echo "  Switch position : CLOSED → BDC"
 fi
 
 # -------------------------------------------------------
-# Phase 2 — Hostname selection
+# Phase 2 — Auto node assignment
 # -------------------------------------------------------
 
 echo ""
 echo "-------------------------------------"
-echo "Phase 2 — Hostname"
+echo "Phase 2 — Node Assignment"
 echo "-------------------------------------"
 
-if [[ "$REUSE_ALL" != "1" ]]; then
+echo "  Scanning mesh for existing $ROLE nodes..."
 
+AUTO_NODE=""
+
+if [[ "$ROLE" == "bdm" ]]; then
+    # BDM: scan 10.10.20.1 through 10.10.20.9
+    for slot in $(seq 1 9); do
+        TARGET="10.10.20.$slot"
+        if ! ping -c1 -W1 "$TARGET" >/dev/null 2>&1; then
+            AUTO_NODE=$(printf "%02d" $slot)
+            echo "  Slot $slot ($TARGET) available — assigning bdm-${AUTO_NODE}"
+            break
+        else
+            echo "  Slot $slot ($TARGET) in use"
+        fi
+    done
+else
+    # BDC: scan 10.10.20.10, .20 ... .230
+    for slot in $(seq 1 23); do
+        TARGET="10.10.20.$((slot * 10))"
+        if ! ping -c1 -W1 "$TARGET" >/dev/null 2>&1; then
+            AUTO_NODE=$(printf "%02d" $slot)
+            echo "  Slot $slot ($TARGET) available — assigning bdc-${AUTO_NODE}"
+            break
+        else
+            echo "  Slot $slot ($TARGET) in use"
+        fi
+    done
+fi
+
+if [[ -z "$AUTO_NODE" ]]; then
+    echo ""
+    echo "  WARNING: No available slots found — all nodes may be in use"
+    echo "  Defaulting to slot 01 — verify manually"
+    AUTO_NODE="01"
+fi
+
+AUTO_HOSTNAME="${ROLE}-${AUTO_NODE}"
+
+if [[ "$ROLE" == "bdm" ]]; then
+    AUTO_MESH_IP="10.10.20.$((10#$AUTO_NODE))"
+else
+    AUTO_MESH_IP="10.10.20.$((10#$AUTO_NODE * 10))"
+fi
+
+AUTO_STREAM="cam${AUTO_NODE}"
+
+# -------------------------------------------------------
+# Phase 3 — Operator confirmation
+# -------------------------------------------------------
+
+echo ""
+echo "-------------------------------------"
+echo "Phase 3 — Confirm Configuration"
+echo "-------------------------------------"
+echo ""
+echo "  Proposed configuration:"
+echo "    Hostname : $AUTO_HOSTNAME"
+echo "    Role     : $ROLE"
+echo "    Mesh IP  : $AUTO_MESH_IP"
+if [[ "$ROLE" == "bdc" ]]; then
+    echo "    Stream   : $AUTO_STREAM"
+fi
+echo ""
+
+read -r -p "  Accept? (y/n/override): " CONFIRM
+
+if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
+    HOSTNAME_INPUT="$AUTO_HOSTNAME"
+    MESH_IP="$AUTO_MESH_IP"
+    NODE_NUM="$AUTO_NODE"
+    STREAM_NAME="$AUTO_STREAM"
+
+elif [[ "$CONFIRM" == "override" ]]; then
+    echo ""
     while true; do
-        read -r -p "Enter hostname (bdm-## or bdc-##): " HOSTNAME_INPUT
+        read -r -p "  Enter hostname (${ROLE}-##): " HOSTNAME_INPUT
         [[ -z "$HOSTNAME_INPUT" ]] && continue
-        if [[ "$HOSTNAME_INPUT" =~ ^bd[cm]-[0-9]{2}$ ]]; then
+        if [[ "$HOSTNAME_INPUT" =~ ^${ROLE}-[0-9]{2}$ ]]; then
             break
         fi
-        echo "  Invalid format — must be bdm-01, bdc-02, etc."
+        echo "  Invalid format — must be ${ROLE}-01, ${ROLE}-02, etc."
     done
 
-fi
+    NODE_NUM=$(echo "$HOSTNAME_INPUT" | grep -oE '[0-9]{2}')
+    STREAM_NAME="cam${NODE_NUM}"
 
-ROLE=$(echo "$HOSTNAME_INPUT" | cut -d- -f1)
-NODE_NUM=$(echo "$HOSTNAME_INPUT" | cut -d- -f2)
-STREAM_NAME="cam${NODE_NUM}"
+    if [[ "$ROLE" == "bdm" ]]; then
+        MESH_IP="10.10.20.$((10#$NODE_NUM))"
+    else
+        MESH_IP="10.10.20.$((10#$NODE_NUM * 10))"
+    fi
 
-# IP scheme:
-#   BDM → 10.10.20.1 - 10.10.20.9   (node number as-is)
-#   BDC → 10.10.20.10, .20, .30...   (node number × 10)
-if [[ "$ROLE" == "bdm" ]]; then
-    MESH_IP="10.10.20.$((10#$NODE_NUM))"
 else
-    MESH_IP="10.10.20.$((10#$NODE_NUM * 10))"
+    echo "  Aborted."
+    exit 0
 fi
 
 echo ""
@@ -86,15 +158,17 @@ echo "  Hostname : $HOSTNAME_INPUT"
 echo "  Role     : $ROLE"
 echo "  Node     : $NODE_NUM"
 echo "  Mesh IP  : $MESH_IP"
-echo "  Stream   : $STREAM_NAME"
+if [[ "$ROLE" == "bdc" ]]; then
+    echo "  Stream   : $STREAM_NAME"
+fi
 
 # -------------------------------------------------------
-# Phase 3 — Hostname + hosts table
+# Phase 4 — Hostname + hosts table
 # -------------------------------------------------------
 
 echo ""
 echo "-------------------------------------"
-echo "Phase 3 — Hostname + Host Table"
+echo "Phase 4 — Hostname + Host Table"
 echo "-------------------------------------"
 
 # Stop cloud-init from overwriting our hostname on next boot
@@ -147,32 +221,26 @@ systemctl restart avahi-daemon
 echo "  avahi restarted"
 
 # -------------------------------------------------------
-# Phase 4 — Role installer
+# Phase 5 — Role installer
 # -------------------------------------------------------
 
 echo ""
 echo "-------------------------------------"
-echo "Phase 4 — Role: $ROLE"
+echo "Phase 5 — Role: $ROLE"
 echo "-------------------------------------"
 
 if [[ "$ROLE" == "bdc" ]]; then
 
-    if [[ "$REUSE_ALL" == "1" ]]; then
-        echo ""
-        echo "  Reusing existing BDC configuration"
-        echo "  BDM Host : $BDM_HOST"
-    else
-        while true; do
-            read -r -p "  Enter BDM hostname (bdm-##, without .local): " BDM_NAME
-            [[ -z "$BDM_NAME" ]] && continue
-            if [[ "$BDM_NAME" =~ ^bdm-[0-9]{2}$ ]]; then
-                break
-            fi
-            echo "  Invalid format — must be bdm-01, bdm-02, etc."
-        done
+    while true; do
+        read -r -p "  Enter BDM hostname (bdm-##, without .local): " BDM_NAME
+        [[ -z "$BDM_NAME" ]] && continue
+        if [[ "$BDM_NAME" =~ ^bdm-[0-9]{2}$ ]]; then
+            break
+        fi
+        echo "  Invalid format — must be bdm-01, bdm-02, etc."
+    done
 
-        BDM_HOST="${BDM_NAME}.local"
-    fi
+    BDM_HOST="${BDM_NAME}.local"
 
     echo ""
     echo "  Running BDC installer..."
@@ -195,26 +263,15 @@ else
 fi
 
 # -------------------------------------------------------
-# Phase 5 — Mesh
+# Phase 6 — Mesh
 # -------------------------------------------------------
 
 echo ""
 echo "-------------------------------------"
-echo "Phase 5 — Mesh"
+echo "Phase 6 — Mesh"
 echo "-------------------------------------"
 
-# Write mesh.conf — runtime script reads this for the committed mesh IP
-# This replaces the bootstrap temp IP with the node permanent IP
-mkdir -p "$BIRDDOG_ROOT/mesh"
-
-cat > "$BIRDDOG_ROOT/mesh/mesh.conf" << EOF
-MESH_IP="${MESH_IP}/24"
-EOF
-
-echo "  mesh.conf written — IP: $MESH_IP/24"
-
-# Restart mesh service so it picks up the committed IP immediately
-systemctl restart birddog-mesh.service
+bash "$BIRDDOG_ROOT/mesh/add_mesh_network.sh" "$HOSTNAME_INPUT"
 
 echo "  Waiting for mesh service to start..."
 sleep 5
