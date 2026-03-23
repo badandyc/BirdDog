@@ -203,7 +203,18 @@ echo "-------------------------------------"
 echo "Phase 5 — Mesh"
 echo "-------------------------------------"
 
-bash "$BIRDDOG_ROOT/mesh/add_mesh_network.sh" "$HOSTNAME_INPUT"
+# Write mesh.conf — runtime script reads this for the committed mesh IP
+# This replaces the bootstrap temp IP with the node permanent IP
+mkdir -p "$BIRDDOG_ROOT/mesh"
+
+cat > "$BIRDDOG_ROOT/mesh/mesh.conf" << EOF
+MESH_IP="${MESH_IP}/24"
+EOF
+
+echo "  mesh.conf written — IP: $MESH_IP/24"
+
+# Restart mesh service so it picks up the committed IP immediately
+systemctl restart birddog-mesh.service
 
 echo "  Waiting for mesh service to start..."
 sleep 5
