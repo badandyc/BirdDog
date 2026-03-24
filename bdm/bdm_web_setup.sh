@@ -72,20 +72,21 @@ cat > "$WEB_DIR/index.html" << 'EOF'
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>BirdDog</title>
 <style>
-
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 
 body {
     background: #0a0a0a;
     color: #ccc;
     font-family: monospace;
     font-size: 13px;
-    height: 100vh;
+    height: 100dvh;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+    user-select: none;
 }
 
 header {
@@ -96,9 +97,17 @@ header {
     background: #141414;
     border-bottom: 1px solid #222;
     flex-shrink: 0;
+    gap: 8px;
 }
 
-header span { color: #666; }
+header strong { font-size: 14px; }
+
+#status {
+    color: #555;
+    font-size: 11px;
+    flex: 1;
+    text-align: center;
+}
 
 button {
     background: #222;
@@ -109,65 +118,59 @@ button {
     font-family: monospace;
     font-size: 12px;
     border-radius: 3px;
+    touch-action: manipulation;
+}
+button:active { background: #2a2a2a; color: #fff; }
+
+/* ── grid viewport ── */
+#viewport {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
 }
 
-button:hover { background: #2a2a2a; color: #fff; }
-
-#status {
-    color: #555;
-    font-size: 11px;
+#pages {
+    display: flex;
+    height: 100%;
+    transition: transform 0.3s ease;
+    will-change: transform;
 }
 
-#grid {
+.page {
+    min-width: 100%;
+    height: 100%;
     display: grid;
-    grid-template-columns: 640px 640px;
-    grid-template-rows: 480px 480px;
     gap: 2px;
     padding: 2px;
-    flex: 1;
-    overflow: auto;
-    justify-content: center;
-    align-content: center;
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(2, 1fr);
 }
 
+/* single tile full page */
+.page.single {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr;
+}
+
+/* portrait single column */
+@media (orientation: portrait) and (max-width: 600px) {
+    .page {
+        grid-template-columns: 1fr;
+        grid-template-rows: repeat(4, 1fr);
+    }
+}
+
+/* ── tile ── */
 .tile {
     position: relative;
     background: #111;
-    width: 640px;
-    height: 480px;
     overflow: hidden;
+    border-radius: 3px;
 }
-
-.tile-label {
-    position: absolute;
-    top: 6px;
-    left: 8px;
-    background: rgba(0,0,0,0.6);
-    color: #aaa;
-    font-size: 11px;
-    padding: 2px 6px;
-    border-radius: 2px;
-    z-index: 10;
-    pointer-events: none;
-}
-
-.tile-status {
-    position: absolute;
-    top: 6px;
-    right: 8px;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #333;
-    z-index: 10;
-}
-
-.tile-status.live  { background: #2d9e2d; }
-.tile-status.dead  { background: #6b2020; }
 
 .tile iframe {
-    width: 640px;
-    height: 480px;
+    width: 100%;
+    height: 100%;
     border: none;
     display: block;
 }
@@ -177,11 +180,86 @@ button:hover { background: #2a2a2a; color: #fff; }
     align-items: center;
     justify-content: center;
     color: #2a2a2a;
-    font-size: 12px;
+    font-size: 11px;
     letter-spacing: 1px;
     text-transform: uppercase;
+    height: 100%;
 }
 
+/* ── overlay ── */
+.overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    pointer-events: none;
+    z-index: 10;
+    padding: 6px 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.65) 0%, transparent 100%);
+}
+
+.tile-name {
+    font-size: 11px;
+    color: #ddd;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+}
+
+.tile-badge {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+}
+.badge-live  { background: rgba(30,160,30,0.85); color: #fff; }
+.badge-dead  { background: rgba(120,30,30,0.85);  color: #aaa; }
+
+.overlay-bottom {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    pointer-events: none;
+    z-index: 10;
+    padding: 6px 8px;
+    display: flex;
+    justify-content: flex-end;
+    background: linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 100%);
+}
+
+.tile-ts {
+    font-size: 9px;
+    color: #555;
+}
+
+/* ── dots ── */
+#dots {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    padding: 5px 0;
+    flex-shrink: 0;
+    background: #0a0a0a;
+}
+
+.dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #333;
+    transition: background 0.2s;
+}
+.dot.active { background: #666; }
+
+/* ── fullscreen tile ── */
+.tile.fullscreen {
+    position: fixed !important;
+    top: 0; left: 0;
+    width: 100vw !important;
+    height: 100dvh !important;
+    z-index: 1000;
+    border-radius: 0;
+}
 </style>
 </head>
 <body>
@@ -189,122 +267,207 @@ button:hover { background: #2a2a2a; color: #fff; }
 <header>
     <strong>BirdDog</strong>
     <span id="status">loading...</span>
-    <button onclick="refresh()">Refresh</button>
+    <button ontouchstart="" onclick="refresh()">Refresh</button>
 </header>
 
-<div id="grid"></div>
+<div id="viewport">
+    <div id="pages"></div>
+</div>
+
+<div id="dots"></div>
 
 <script>
+const PAGE_SIZE    = 4;
+const REFRESH_MS   = 15000;
+const SWIPE_THRESH = 50;
+const DBL_TAP_MS   = 300;
 
-const SLOTS = ['cam01', 'cam02', 'cam03', 'cam04'];
-const REFRESH_INTERVAL = 15000;
-
+let allSlots   = [];
+let currentPage = 0;
+let totalPages  = 0;
 let refreshTimer = null;
+let touchStartX  = 0;
+let touchStartY  = 0;
+let fullscreenTile = null;
+let lastTapTime  = {};
+let lastTapEl    = {};
 
 async function getActiveStreams() {
     try {
         const r = await fetch('/api/v3/paths/list');
         const d = await r.json();
         const active = new Set();
-        (d.items || []).forEach(item => {
-            if (item.ready) active.add(item.name);
-        });
+        (d.items || []).forEach(i => { if (i.ready) active.add(i.name); });
         return active;
-    } catch (e) {
-        return null;
-    }
+    } catch(e) { return null; }
 }
 
-async function refresh() {
+function buildSlots(active) {
+    // Build slot list from active streams + any cams that were previously live
+    const known = new Set([...allSlots, ...(active || [])]);
+    // Always include cam01-cam04 as baseline, plus any discovered streams
+    for (let i = 1; i <= 4; i++) known.add('cam' + String(i).padStart(2,'0'));
+    // Add any active streams
+    if (active) active.forEach(n => known.add(n));
+    return [...known].sort();
+}
 
-    clearTimeout(refreshTimer);
+function renderPages(active) {
+    const host   = window.location.hostname;
+    const slots  = buildSlots(active);
+    const pages  = document.getElementById('pages');
+    const dotsEl = document.getElementById('dots');
 
-    const status = document.getElementById('status');
-    status.textContent = 'refreshing...';
+    totalPages = Math.ceil(slots.length / PAGE_SIZE);
+    if (currentPage >= totalPages) currentPage = 0;
 
-    const active = await getActiveStreams();
-    const grid = document.getElementById('grid');
-    const host = window.location.hostname;
+    pages.innerHTML = '';
+    dotsEl.innerHTML = '';
 
-    if (active === null) {
-        status.textContent = 'API unreachable';
-        refreshTimer = setTimeout(refresh, REFRESH_INTERVAL);
-        return;
-    }
+    for (let p = 0; p < totalPages; p++) {
+        const pageEl = document.createElement('div');
+        pageEl.className = 'page' + (slots.length === 1 ? ' single' : '');
 
-    let liveCount = 0;
+        const batch = slots.slice(p * PAGE_SIZE, (p + 1) * PAGE_SIZE);
 
-    SLOTS.forEach(name => {
-
-        let tile = document.getElementById('tile-' + name);
-        const isLive = active.has(name);
-        const hasFrame = tile && tile.querySelector('iframe');
-        const hasEmpty = tile && tile.querySelector('.tile-empty');
-
-        // Create tile if it doesn't exist yet
-        if (!tile) {
-            tile = document.createElement('div');
+        batch.forEach(name => {
+            const isLive = active && active.has(name);
+            const tile   = document.createElement('div');
             tile.className = 'tile';
-            tile.id = 'tile-' + name;
+            tile.dataset.name = name;
 
-            const label = document.createElement('div');
-            label.className = 'tile-label';
-            label.textContent = name;
+            // overlay top
+            const ov = document.createElement('div');
+            ov.className = 'overlay';
+            ov.innerHTML = `
+                <span class="tile-name">${name}</span>
+                <span class="tile-badge ${isLive ? 'badge-live' : 'badge-dead'}">${isLive ? 'LIVE' : 'NO SIGNAL'}</span>
+            `;
 
-            const dot = document.createElement('div');
-            dot.className = 'tile-status';
+            // overlay bottom
+            const ovb = document.createElement('div');
+            ovb.className = 'overlay-bottom';
+            ovb.innerHTML = `<span class="tile-ts">${new Date().toLocaleTimeString()}</span>`;
 
-            tile.appendChild(label);
-            tile.appendChild(dot);
-            grid.appendChild(tile);
-        }
-
-        const dot = tile.querySelector('.tile-status');
-
-        if (isLive) {
-
-            liveCount++;
-            dot.className = 'tile-status live';
-
-            // Only create iframe if not already streaming — avoids reset
-            if (!hasFrame) {
-                const empty = tile.querySelector('.tile-empty');
-                if (empty) empty.remove();
-
+            if (isLive) {
                 const frame = document.createElement('iframe');
-                frame.src = `http://${host}:8889/${name}`;
+                frame.src   = `http://${host}:8889/${name}`;
                 frame.allow = 'autoplay';
-                tile.insertBefore(frame, tile.firstChild);
-            }
-
-        } else {
-
-            dot.className = 'tile-status dead';
-
-            // Remove iframe if stream went offline
-            if (hasFrame) {
-                hasFrame.remove();
-            }
-
-            if (!hasEmpty) {
+                tile.appendChild(frame);
+            } else {
                 const empty = document.createElement('div');
                 empty.className = 'tile-empty';
                 empty.textContent = name + ' — no signal';
-                tile.insertBefore(empty, tile.firstChild);
+                tile.appendChild(empty);
             }
 
-        }
+            tile.appendChild(ov);
+            tile.appendChild(ovb);
+            attachTileEvents(tile);
+            pageEl.appendChild(tile);
+        });
 
+        pages.appendChild(pageEl);
+
+        // dot
+        const dot = document.createElement('div');
+        dot.className = 'dot' + (p === currentPage ? ' active' : '');
+        dot.onclick = () => goToPage(p);
+        dotsEl.appendChild(dot);
+    }
+
+    updatePagePosition(false);
+}
+
+function updatePagePosition(animate) {
+    const pages = document.getElementById('pages');
+    pages.style.transition = animate ? 'transform 0.3s ease' : 'none';
+    pages.style.transform  = `translateX(-${currentPage * 100}%)`;
+
+    document.querySelectorAll('.dot').forEach((d, i) => {
+        d.classList.toggle('active', i === currentPage);
     });
+}
 
-    const now = new Date().toLocaleTimeString();
-    status.textContent = `${liveCount} / ${SLOTS.length} live — ${now}`;
+function goToPage(p) {
+    if (p < 0 || p >= totalPages) return;
+    currentPage = p;
+    updatePagePosition(true);
+}
 
-    refreshTimer = setTimeout(refresh, REFRESH_INTERVAL);
+// ── swipe ──
+const vp = document.getElementById('viewport');
+
+vp.addEventListener('touchstart', e => {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+}, { passive: true });
+
+vp.addEventListener('touchend', e => {
+    if (fullscreenTile) return;
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    const dy = e.changedTouches[0].clientY - touchStartY;
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > SWIPE_THRESH) {
+        dx < 0 ? goToPage(currentPage + 1) : goToPage(currentPage - 1);
+    }
+}, { passive: true });
+
+// ── double tap fullscreen ──
+function attachTileEvents(tile) {
+    tile.addEventListener('touchend', e => {
+        const name = tile.dataset.name;
+        const now  = Date.now();
+        if (lastTapEl[name] === tile && now - (lastTapTime[name] || 0) < DBL_TAP_MS) {
+            toggleFullscreen(tile);
+            lastTapTime[name] = 0;
+        } else {
+            lastTapTime[name] = now;
+            lastTapEl[name]   = tile;
+        }
+    }, { passive: true });
+
+    // desktop double click
+    tile.addEventListener('dblclick', () => toggleFullscreen(tile));
+}
+
+function toggleFullscreen(tile) {
+    if (fullscreenTile === tile) {
+        tile.classList.remove('fullscreen');
+        fullscreenTile = null;
+    } else {
+        if (fullscreenTile) fullscreenTile.classList.remove('fullscreen');
+        tile.classList.add('fullscreen');
+        fullscreenTile = tile;
+    }
+}
+
+// tap fullscreen to exit on mobile
+document.addEventListener('touchend', e => {
+    if (!fullscreenTile) return;
+    if (!fullscreenTile.contains(e.target)) return;
+    // let double-tap handler deal with it
+}, { passive: true });
+
+// ── refresh ──
+async function refresh() {
+    clearTimeout(refreshTimer);
+    document.getElementById('status').textContent = 'refreshing...';
+
+    const active = await getActiveStreams();
+    const now    = new Date().toLocaleTimeString();
+    const count  = active ? active.size : 0;
+
+    renderPages(active);
+
+    document.getElementById('status').textContent =
+        active === null
+            ? 'API unreachable'
+            : `${count} live — ${now}`;
+
+    refreshTimer = setTimeout(refresh, REFRESH_MS);
 }
 
 refresh();
-
 </script>
 </body>
 </html>
