@@ -140,6 +140,9 @@ remove_path /etc/dnsmasq.conf
 remove_path /etc/systemd/network
 
 # Restore eth0 DHCP so management access survives reboot
+# We commit to systemd-networkd as the network manager for all nodes —
+# ensure it is enabled and NetworkManager is disabled so the
+# restored config is actually picked up on reboot.
 mkdir -p /etc/systemd/network
 cat > /etc/systemd/network/10-eth0.network << 'EOF'
 [Match]
@@ -153,6 +156,15 @@ ClientIdentifier=mac
 SendHostname=yes
 EOF
 echo "  eth0 DHCP config restored"
+
+# Ensure systemd-networkd is enabled and will manage eth0 on reboot
+systemctl enable systemd-networkd 2>/dev/null || true
+systemctl disable NetworkManager 2>/dev/null || true
+echo "  systemd-networkd enabled — NetworkManager disabled"
+
+# Reconfigure eth0 immediately so current session stays connected
+networkctl reconfigure eth0 2>/dev/null || true
+echo "  eth0 reconfigured"
 
 # -------------------------------------------------------
 # Step 5 — Reset hostname
