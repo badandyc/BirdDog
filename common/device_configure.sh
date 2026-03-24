@@ -170,6 +170,8 @@ echo ""
 echo "-------------------------------------"
 echo "Phase 3 — Confirm Configuration"
 echo "-------------------------------------"
+AUTO_ROLE="$ROLE"
+
 echo ""
 echo "  Proposed configuration:"
 echo "    Hostname : $AUTO_HOSTNAME"
@@ -182,7 +184,7 @@ echo ""
 
 echo "  [Y]es  accept proposed configuration"
 echo "  [N]o   abort"
-echo "  [OVERRIDE]  manually enter node number"
+echo "  [OVERRIDE]  manually enter full hostname (any role — switch mismatch will trigger SOS on reboot)"
 echo ""
 read -r -p "  Choice: " CONFIRM
 
@@ -195,14 +197,15 @@ if [[ "$CONFIRM" == "Y" ]]; then
 elif [[ "$CONFIRM" == "OVERRIDE" ]]; then
     echo ""
     while true; do
-        read -r -p "  Enter hostname (${ROLE}-##): " HOSTNAME_INPUT
+        read -r -p "  Enter hostname (bdm-## or bdc-##): " HOSTNAME_INPUT
         [[ -z "$HOSTNAME_INPUT" ]] && continue
-        if [[ "$HOSTNAME_INPUT" =~ ^${ROLE}-[0-9]{2}$ ]]; then
+        if [[ "$HOSTNAME_INPUT" =~ ^bd[cm]-[0-9]{2}$ ]]; then
             break
         fi
-        echo "  Invalid format — must be ${ROLE}-01, ${ROLE}-02, etc."
+        echo "  Invalid format — must be bdm-01, bdc-02, etc."
     done
 
+    ROLE=$(echo "$HOSTNAME_INPUT" | cut -d- -f1)
     NODE_NUM=$(echo "$HOSTNAME_INPUT" | grep -oE '[0-9]{2}')
     STREAM_NAME="cam${NODE_NUM}"
 
@@ -210,6 +213,12 @@ elif [[ "$CONFIRM" == "OVERRIDE" ]]; then
         MESH_IP="10.10.20.$((10#$NODE_NUM))"
     else
         MESH_IP="10.10.20.$((10#$NODE_NUM * 10))"
+    fi
+
+    if [[ "$ROLE" != "$AUTO_ROLE" ]]; then
+        echo ""
+        echo "  WARNING: Committed role ($ROLE) differs from switch position ($AUTO_ROLE)"
+        echo "  Node will boot to safe state with SOS alert until switch is flipped to match"
     fi
 
 elif [[ "$CONFIRM" == "N" ]]; then
