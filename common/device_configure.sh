@@ -361,7 +361,41 @@ echo "-------------------------------------"
 
 if [[ "$ROLE" == "bdc" ]]; then
 
-    # Scan mesh for existing BDM nodes and auto-suggest the first one found
+    # ── BDC node name confirmation ──
+    echo ""
+    echo "  Proposed BDC node:"
+    echo "    Hostname : $HOSTNAME_INPUT"
+    echo "    Mesh IP  : $MESH_IP"
+    echo "    Stream   : $STREAM_NAME"
+    echo ""
+    read -r -p "  Accept BDC node name? [Y]es / [N]o: " BDC_NAME_CONFIRM
+
+    if [[ "$BDC_NAME_CONFIRM" == "N" ]]; then
+        echo ""
+        while true; do
+            read -r -p "  Enter node number (01-23): " OVERRIDE_NUM
+            [[ -z "$OVERRIDE_NUM" ]] && continue
+            if [[ "$OVERRIDE_NUM" =~ ^[0-9]{2}$ && "$((10#$OVERRIDE_NUM))" -ge 1 && "$((10#$OVERRIDE_NUM))" -le 23 ]]; then
+                break
+            fi
+            echo "  Invalid — must be 01 through 23"
+        done
+        NODE_NUM="$OVERRIDE_NUM"
+        HOSTNAME_INPUT="bdc-${NODE_NUM}"
+        MESH_IP="10.10.20.$((10#$NODE_NUM * 10))"
+        STREAM_NAME="cam${NODE_NUM}"
+        echo ""
+        echo "  Updated BDC node:"
+        echo "    Hostname : $HOSTNAME_INPUT"
+        echo "    Mesh IP  : $MESH_IP"
+        echo "    Stream   : $STREAM_NAME"
+    elif [[ "$BDC_NAME_CONFIRM" != "Y" ]]; then
+        echo "  Aborted."
+        exit 0
+    fi
+
+    # ── BDM auto-detect ──
+    echo ""
     echo "  Scanning mesh for BDM nodes..."
     AUTO_BDM=""
     for slot in $(seq 1 9); do
@@ -375,9 +409,19 @@ if [[ "$ROLE" == "bdc" ]]; then
 
     if [[ -n "$AUTO_BDM" ]]; then
         echo ""
-        read -r -p "  BDM hostname [$AUTO_BDM]: " BDM_NAME
-        if [[ -z "$BDM_NAME" ]]; then
+        read -r -p "  Use $AUTO_BDM as your BDM? [Y]es / [N]o: " BDM_CONFIRM
+        if [[ "$BDM_CONFIRM" == "Y" ]]; then
             BDM_NAME="$AUTO_BDM"
+        else
+            echo ""
+            while true; do
+                read -r -p "  Enter BDM hostname (bdm-##, without .local): " BDM_NAME
+                [[ -z "$BDM_NAME" ]] && continue
+                if [[ "$BDM_NAME" =~ ^bdm-[0-9]{2}$ ]]; then
+                    break
+                fi
+                echo "  Invalid format — must be bdm-01, bdm-02, etc."
+            done
         fi
     else
         echo "  No BDM found on mesh — enter manually"
@@ -389,11 +433,6 @@ if [[ "$ROLE" == "bdc" ]]; then
             fi
             echo "  Invalid format — must be bdm-01, bdm-02, etc."
         done
-    fi
-
-    if [[ ! "$BDM_NAME" =~ ^bdm-[0-9]{2}$ ]]; then
-        echo "  Invalid format — must be bdm-01, bdm-02, etc."
-        exit 1
     fi
 
     BDM_HOST="${BDM_NAME}.local"
