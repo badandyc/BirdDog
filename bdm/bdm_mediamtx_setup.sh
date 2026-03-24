@@ -60,15 +60,11 @@ fi
 echo ""
 echo "=== Writing configuration ==="
 
-# Detect eth0 IP for WebRTC ICE candidate locking
-ETH0_IP=$(ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet )[^/]+' | head -1)
-if [[ -z "$ETH0_IP" ]]; then
-    echo "  WARNING: eth0 IP not found — WebRTC will use all interfaces"
-    WEBRTC_UDP_ADDR=":8189"
-else
-    echo "  eth0 IP detected: $ETH0_IP"
-    WEBRTC_UDP_ADDR="${ETH0_IP}:8189"
-fi
+# Bind WebRTC UDP to all interfaces — locking to a specific IP causes
+# mediamtx to fail on reboot if the IP has changed or is not yet assigned.
+# All interfaces binding works correctly for BDM field deployments.
+WEBRTC_UDP_ADDR=":8189"
+echo "  WebRTC UDP binding to all interfaces (:8189)"
 
 cat > "$CONFIG" << EOF
 logLevel: info
