@@ -261,7 +261,7 @@ button:active { background: #2a2a2a; color: #fff; }
 <header>
     <strong>BirdDog</strong>
     <span id="status">loading...</span>
-    <button ontouchstart="" onclick="refresh()">Refresh</button>
+    <button id="refresh-btn" ontouchstart="" onclick="refresh()">Refresh</button>
 </header>
 
 <div id="viewport">
@@ -272,7 +272,7 @@ button:active { background: #2a2a2a; color: #fff; }
 
 <script>
 const PAGE_SIZE    = 4;
-const REFRESH_MS   = 15000;
+const REFRESH_MS   = 15000; // kept for reference, auto-refresh disabled
 const SWIPE_THRESH = 50;
 const DBL_TAP_MS   = 400;
 
@@ -300,7 +300,7 @@ function buildSlots(active) {
     // Build slot list from active streams + any cams that were previously live
     const known = new Set([...allSlots, ...(active || [])]);
     // Always include cam01-cam04 as baseline, plus any discovered streams
-    for (let i = 1; i <= 4; i++) known.add('cam' + String(i).padStart(2,'0'));
+    for (let i = 1; i <= 8; i++) known.add('cam' + String(i).padStart(2,'0'));
     // Add any active streams
     if (active) active.forEach(n => known.add(n));
     return [...known].sort();
@@ -464,9 +464,22 @@ async function refresh() {
         active === null
             ? 'API unreachable'
             : `${count} live — ${now}`;
-
-    refreshTimer = setTimeout(refresh, REFRESH_MS);
 }
+
+// ── long press on header for refresh ──
+let headerPressTimer = null;
+const hdr = document.querySelector('header');
+
+hdr.addEventListener('touchstart', e => {
+    headerPressTimer = setTimeout(() => {
+        refresh();
+        navigator.vibrate && navigator.vibrate(50);
+    }, 5000);
+}, { passive: true });
+
+hdr.addEventListener('touchend', () => {
+    clearTimeout(headerPressTimer);
+}, { passive: true });
 
 refresh();
 </script>
