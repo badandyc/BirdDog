@@ -361,14 +361,40 @@ echo "-------------------------------------"
 
 if [[ "$ROLE" == "bdc" ]]; then
 
-    while true; do
-        read -r -p "  Enter BDM hostname (bdm-##, without .local): " BDM_NAME
-        [[ -z "$BDM_NAME" ]] && continue
-        if [[ "$BDM_NAME" =~ ^bdm-[0-9]{2}$ ]]; then
+    # Scan mesh for existing BDM nodes and auto-suggest the first one found
+    echo "  Scanning mesh for BDM nodes..."
+    AUTO_BDM=""
+    for slot in $(seq 1 9); do
+        TARGET="10.10.20.$slot"
+        if ping -c1 -W1 "$TARGET" >/dev/null 2>&1; then
+            AUTO_BDM="bdm-$(printf "%02d" $slot)"
+            echo "  Found BDM at $TARGET → $AUTO_BDM"
             break
         fi
-        echo "  Invalid format — must be bdm-01, bdm-02, etc."
     done
+
+    if [[ -n "$AUTO_BDM" ]]; then
+        echo ""
+        read -r -p "  BDM hostname [$AUTO_BDM]: " BDM_NAME
+        if [[ -z "$BDM_NAME" ]]; then
+            BDM_NAME="$AUTO_BDM"
+        fi
+    else
+        echo "  No BDM found on mesh — enter manually"
+        while true; do
+            read -r -p "  Enter BDM hostname (bdm-##, without .local): " BDM_NAME
+            [[ -z "$BDM_NAME" ]] && continue
+            if [[ "$BDM_NAME" =~ ^bdm-[0-9]{2}$ ]]; then
+                break
+            fi
+            echo "  Invalid format — must be bdm-01, bdm-02, etc."
+        done
+    fi
+
+    if [[ ! "$BDM_NAME" =~ ^bdm-[0-9]{2}$ ]]; then
+        echo "  Invalid format — must be bdm-01, bdm-02, etc."
+        exit 1
+    fi
 
     BDM_HOST="${BDM_NAME}.local"
 
