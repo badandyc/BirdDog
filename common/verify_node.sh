@@ -287,31 +287,39 @@ if [[ "$FAIL" -eq 1 ]]; then
     echo "================================="
     echo ""
     echo "  Check LEDs on unit:"
-    echo "    Blue  — mesh   (off=down  slow-blink=joining  fast-blink=no peer  solid=joined)"
-    echo "    Green — stream (off=failed  blink=restarting  solid=ok)"
-    echo "    Red   — camera (on=fault)"
+    echo "    White  — power     (on=bus powered)"
+    echo "    Yellow — bootstrap (solid=unconfigured or switch/role mismatch)"
+    echo "    Blue   — mesh      (off=down  slow-blink=joining  fast-blink=no peer  solid=joined)"
+    echo "    Green  — stream    (off=failed  blink=restarting  solid=ok)"
+    echo "    Red    — camera    (on=fault)"
     echo ""
     exit 1
 elif [[ "$ROLE" == "UNKNOWN" ]]; then
     echo "NODE STATUS: NOT CONFIGURED"
     echo "================================="
+    echo ""
+    echo "  Yellow LED should be solid — node is in bootstrap state"
     echo "  Run: birddog configure"
+    echo ""
     exit 0
 elif [[ "$WARN" -eq 1 ]]; then
     echo "NODE STATUS: DEGRADED"
     echo "================================="
     echo ""
     echo "  Check LEDs on unit:"
-    echo "    Blue  — mesh   (off=down  slow-blink=joining  fast-blink=no peer  solid=joined)"
-    echo "    Green — stream (off=failed  blink=restarting  solid=ok)"
-    echo "    Red   — camera (on=fault)"
+    echo "    White  — power     (on=bus powered)"
+    echo "    Yellow — bootstrap (solid=unconfigured or switch/role mismatch)"
+    echo "    Blue   — mesh      (off=down  slow-blink=joining  fast-blink=no peer  solid=joined)"
+    echo "    Green  — stream    (off=failed  blink=restarting  solid=ok)"
+    echo "    Red    — camera    (on=fault)"
     echo ""
     exit 0
 else
     echo "NODE STATUS: OPERATIONAL"
     echo "================================="
     echo ""
-    echo "  All systems nominal — LEDs should show blue + green solid"
+    echo "  All systems nominal"
+    echo "  LEDs should show: yellow=off  blue=solid  green=solid  red=off"
     echo ""
     exit 0
 fi
