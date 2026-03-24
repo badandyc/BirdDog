@@ -300,7 +300,7 @@ function buildSlots(active) {
     // Build slot list from active streams + any cams that were previously live
     const known = new Set([...allSlots, ...(active || [])]);
     // Always include cam01-cam04 as baseline, plus any discovered streams
-    for (let i = 1; i <= 8; i++) known.add('cam' + String(i).padStart(2,'0'));
+    for (let i = 1; i <= 4; i++) known.add('cam' + String(i).padStart(2,'0'));
     // Add any active streams
     if (active) active.forEach(n => known.add(n));
     return [...known].sort();
