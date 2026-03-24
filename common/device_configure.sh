@@ -196,17 +196,55 @@ if [[ "$CONFIRM" == "Y" ]]; then
 
 elif [[ "$CONFIRM" == "OVERRIDE" ]]; then
     echo ""
+
+    # Ask for role first
     while true; do
-        read -r -p "  Enter hostname (bdm-## or bdc-##): " HOSTNAME_INPUT
-        [[ -z "$HOSTNAME_INPUT" ]] && continue
-        if [[ "$HOSTNAME_INPUT" =~ ^bd[cm]-[0-9]{2}$ ]]; then
+        read -r -p "  Enter role (BDM or BDC): " OVERRIDE_ROLE_INPUT
+        OVERRIDE_ROLE_INPUT=$(echo "$OVERRIDE_ROLE_INPUT" | tr '[:upper:]' '[:lower:]')
+        if [[ "$OVERRIDE_ROLE_INPUT" == "bdm" || "$OVERRIDE_ROLE_INPUT" == "bdc" ]]; then
             break
         fi
-        echo "  Invalid format — must be bdm-01, bdc-02, etc."
+        echo "  Invalid — enter BDM or BDC"
     done
 
-    ROLE=$(echo "$HOSTNAME_INPUT" | cut -d- -f1)
-    NODE_NUM=$(echo "$HOSTNAME_INPUT" | grep -oE '[0-9]{2}')
+    ROLE="$OVERRIDE_ROLE_INPUT"
+
+    # Re-scan mesh for the overridden role
+    echo ""
+    echo "  Scanning mesh for existing $ROLE nodes..."
+
+    OVERRIDE_NODE=""
+    if [[ "$ROLE" == "bdm" ]]; then
+        for slot in $(seq 1 9); do
+            TARGET="10.10.20.$slot"
+            if ! ping -c1 -W1 "$TARGET" >/dev/null 2>&1; then
+                OVERRIDE_NODE=$(printf "%02d" $slot)
+                echo "  Slot $slot ($TARGET) available — assigning ${ROLE}-${OVERRIDE_NODE}"
+                break
+            else
+                echo "  Slot $slot ($TARGET) in use"
+            fi
+        done
+    else
+        for slot in $(seq 1 23); do
+            TARGET="10.10.20.$((slot * 10))"
+            if ! ping -c1 -W1 "$TARGET" >/dev/null 2>&1; then
+                OVERRIDE_NODE=$(printf "%02d" $slot)
+                echo "  Slot $slot ($TARGET) available — assigning ${ROLE}-${OVERRIDE_NODE}"
+                break
+            else
+                echo "  Slot $slot ($TARGET) in use"
+            fi
+        done
+    fi
+
+    if [[ -z "$OVERRIDE_NODE" ]]; then
+        echo "  WARNING: No available slots found — defaulting to slot 01"
+        OVERRIDE_NODE="01"
+    fi
+
+    HOSTNAME_INPUT="${ROLE}-${OVERRIDE_NODE}"
+    NODE_NUM="$OVERRIDE_NODE"
     STREAM_NAME="cam${NODE_NUM}"
 
     if [[ "$ROLE" == "bdm" ]]; then
@@ -215,10 +253,26 @@ elif [[ "$CONFIRM" == "OVERRIDE" ]]; then
         MESH_IP="10.10.20.$((10#$NODE_NUM * 10))"
     fi
 
+    echo ""
+    echo "  Override configuration:"
+    echo "    Hostname : $HOSTNAME_INPUT"
+    echo "    Role     : $ROLE"
+    echo "    Mesh IP  : $MESH_IP"
+    if [[ "$ROLE" == "bdc" ]]; then
+        echo "    Stream   : $STREAM_NAME"
+    fi
+
     if [[ "$ROLE" != "$AUTO_ROLE" ]]; then
         echo ""
         echo "  WARNING: Committed role ($ROLE) differs from switch position ($AUTO_ROLE)"
         echo "  Node will boot to safe state with SOS alert until switch is flipped to match"
+    fi
+
+    echo ""
+    read -r -p "  Accept override? (Y/N): " OVERRIDE_CONFIRM
+    if [[ "$OVERRIDE_CONFIRM" != "Y" ]]; then
+        echo "  Aborted."
+        exit 0
     fi
 
 elif [[ "$CONFIRM" == "N" ]]; then
