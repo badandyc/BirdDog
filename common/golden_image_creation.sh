@@ -592,6 +592,7 @@ echo ""
 echo "[Phase 3] Fetch Scripts"
 
 FETCH_FAILED=0
+GOLDEN_UPDATED=0
 
 fetch_file() {
     local REMOTE_PATH="$1"
@@ -616,7 +617,23 @@ fetch_file() {
     fi
 }
 
-fetch_file common/golden_image_creation.sh  "$BIRDDOG_ROOT/common/golden_image_creation.sh"
+# Fetch golden image first and flag if it changed —
+# the update runs the already-loaded version in memory so the
+# operator needs to know the on-disk version is now newer
+TMP_GI="/tmp/birddog_fetch_gi.$$"
+if curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/${REMOTE_COMMIT}/common/golden_image_creation.sh" -o "$TMP_GI" 2>/dev/null; then
+    if cmp -s "$TMP_GI" "$BIRDDOG_ROOT/common/golden_image_creation.sh" 2>/dev/null; then
+        printf "  %-8s %s\n" "UNCHANGED" "common/golden_image_creation.sh"
+    else
+        printf "  %-8s %s\n" "UPDATED" "common/golden_image_creation.sh"
+        install -m 0755 "$TMP_GI" "$BIRDDOG_ROOT/common/golden_image_creation.sh"
+        GOLDEN_UPDATED=1
+    fi
+else
+    printf "  %-8s %s\n" "FAILED" "common/golden_image_creation.sh"
+    FETCH_FAILED=1
+fi
+rm -f "$TMP_GI"
 fetch_file common/device_configure.sh       "$BIRDDOG_ROOT/common/device_configure.sh"
 fetch_file common/oobe_reset.sh             "$BIRDDOG_ROOT/common/oobe_reset.sh"
 fetch_file common/verify_node.sh            "$BIRDDOG_ROOT/common/verify_node.sh"
@@ -1417,6 +1434,13 @@ echo "====================================="
 echo ""
 echo "Install log: $LOG"
 echo ""
+
+if [[ "$GOLDEN_UPDATED" -eq 1 ]]; then
+    echo "  NOTE: golden_image_creation.sh was updated on disk."
+    echo "  This run executed the previous version already in memory."
+    echo "  Changes will take effect on the next: birddog update"
+    echo ""
+fi
 
 if [[ "$BIRDDOG_MODE" == "full" ]]; then
     echo "====================================="
