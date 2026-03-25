@@ -1080,8 +1080,8 @@ LAST_PEER_TIME=0
 LAST_JOIN_TIME=0
 
 JOIN_COOLDOWN=15
-SUSPECT_THRESHOLD=15
-RECOVERY_THRESHOLD=40
+SUSPECT_THRESHOLD=45
+RECOVERY_THRESHOLD=90
 
 log() {
     echo "[$(date '+%H:%M:%S')] [mesh] $1" >> "$LOG"
@@ -1278,7 +1278,7 @@ while true; do
                 PEER_IP=$(echo "$line" | awk '{print $1}')
                 [[ -n "$PEER_IP" ]] && ping -c1 -W1 "$PEER_IP" >/dev/null 2>&1 || true
             done < <(ip neigh show dev wlan1 2>/dev/null | grep -v FAILED)
-            sleep $(( 30 + RANDOM % 5 ))
+            sleep $(( 35 + RANDOM % 10 ))
             ;;
         *)          sleep 5  ;;
     esac
