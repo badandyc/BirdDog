@@ -1380,6 +1380,42 @@ case "$1" in
     rocks)
         cat /usr/local/bin/birddog_art
         ;;
+    web)
+        HOST=$(hostname)
+        API="http://localhost:9997/v3/paths/list"
+        echo ""
+        echo "================================="
+        echo "BirdDog Streams"
+        echo "================================="
+        if ! curl -s --connect-timeout 3 "$API" >/dev/null 2>&1; then
+            echo "  MediaMTX API not responding — is this a BDM node?"
+            echo ""
+            exit 1
+        fi
+        ITEMS=$(curl -s "$API" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+items = data.get('items', [])
+if not items:
+    print('  No streams found')
+else:
+    for item in items:
+        name = item.get('name','?')
+        ready = item.get('ready', False)
+        status = 'LIVE' if ready else None
+        if ready:
+            print(f'  {name:<10} LIVE    rtsp://$HOST.local:8554/{name}')
+" 2>/dev/null)
+        if [[ -z "$ITEMS" ]]; then
+            echo "  No active streams"
+        else
+            echo "$ITEMS"
+        fi
+        echo ""
+        echo "  Dashboard : http://${HOST}.local"
+        echo "================================="
+        echo ""
+        ;;
     ""|help)
         echo ""
         echo "BirdDog CLI"
@@ -1389,6 +1425,7 @@ case "$1" in
         echo "  birddog configure   assign role and configure node"
         echo "  birddog reset       factory reset to unconfigured state"
         echo "  birddog verify      run node health check"
+        echo "  birddog web         show active camera streams"
         echo "  birddog radios      show radio interface layout"
         echo "  birddog version     show platform version"
         echo ""
