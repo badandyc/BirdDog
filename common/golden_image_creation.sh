@@ -187,7 +187,7 @@ Type=oneshot
 # across reboots and hardware configurations.
 # brcmfmac is the onboard Pi WiFi driver.
 # mt76x2u (mesh) and rtl8192cu (AP) are explicitly unblocked.
-ExecStart=/bin/bash -c '    for phy in /sys/class/ieee80211/*/; do         driver=$(basename $(readlink $phy/device/driver 2>/dev/null) 2>/dev/null);         name=$(cat $phy/name 2>/dev/null);         if [[ "$driver" == "brcmfmac" ]]; then             rfkill block "$name" 2>/dev/null || true;         elif [[ "$driver" == "mt76x2u" || "$driver" == "rtl8192cu" ]]; then             rfkill unblock "$name" 2>/dev/null || true;         fi;     done'
+ExecStart=/bin/bash -c '    for phy in /sys/class/ieee80211/*/; do         driver=$(basename $(readlink $phy/device/driver 2>/dev/null) 2>/dev/null);         name=$(cat $phy/name 2>/dev/null);         if [[ "$driver" == "brcmfmac" ]]; then             rfkill block "$name" 2>/dev/null || true;         fi;     done'
 RemainAfterExit=yes
 
 [Install]
