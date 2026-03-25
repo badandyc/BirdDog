@@ -186,7 +186,12 @@ echo "  [Y]es  accept proposed configuration"
 echo "  [N]o   abort"
 echo "  [OVERRIDE]  manually enter full hostname (any role — switch mismatch will trigger SOS on reboot)"
 echo ""
-read -r -p "  Choice: " CONFIRM
+
+while true; do
+    read -r -p "  Choice: " CONFIRM
+    [[ "$CONFIRM" == "Y" || "$CONFIRM" == "N" || "$CONFIRM" == "OVERRIDE" ]] && break
+    echo "  Invalid — enter Y, N, or OVERRIDE"
+done
 
 if [[ "$CONFIRM" == "Y" ]]; then
     HOSTNAME_INPUT="$AUTO_HOSTNAME"
@@ -279,9 +284,6 @@ elif [[ "$CONFIRM" == "OVERRIDE" ]]; then
 elif [[ "$CONFIRM" == "N" ]]; then
     echo "  Aborted."
     exit 0
-else
-    echo "  Invalid selection — aborted."
-    exit 1
 fi
 
 echo ""
