@@ -1380,6 +1380,53 @@ case "$1" in
     rocks)
         cat /usr/local/bin/birddog_art
         ;;
+    status)
+        HOST=$(hostname)
+        ROLE="unknown"
+        [[ "$HOST" =~ ^bdm-[0-9]{2}$ ]] && ROLE="BDM"
+        [[ "$HOST" =~ ^bdc-[0-9]{2}$ ]] && ROLE="BDC"
+        COMMIT=$(cat "$BIRDDOG_ROOT/version/COMMIT" 2>/dev/null || echo "unknown")
+        echo ""
+        echo "================================="
+        echo "BirdDog Status — $HOST"
+        echo "================================="
+        echo "  Role     : $ROLE"
+        # mesh
+        MESH_SVC=$(systemctl is-active birddog-mesh 2>/dev/null)
+        PEERS=$(iw dev wlan1 station dump 2>/dev/null | grep -c "^Station" || echo 0)
+        MESH_IP=$(ip -4 addr show wlan1 2>/dev/null | grep -oP "(?<=inet )[^/]+" | head -1)
+        if [[ "$MESH_SVC" == "active" ]]; then
+            echo "  Mesh     : joined (${PEERS} peers) — ${MESH_IP:-no IP}"
+        else
+            echo "  Mesh     : down"
+        fi
+        # role specific
+        if [[ "$ROLE" == "BDM" ]]; then
+            MEDIAMTX=$(systemctl is-active mediamtx 2>/dev/null)
+            echo "  MediaMTX : $MEDIAMTX"
+            if [[ "$MEDIAMTX" == "active" ]]; then
+                STREAMS=$(curl -s --connect-timeout 2 http://localhost:9997/v3/paths/list 2>/dev/null | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+live=[i['name'] for i in d.get('items',[]) if i.get('ready')]
+print(f'{len(live)} live ({", ".join(live)})' if live else '0 live')
+" 2>/dev/null || echo "unknown")
+                echo "  Streams  : $STREAMS"
+            fi
+            echo "  Dashboard: http://${HOST}.local"
+        elif [[ "$ROLE" == "BDC" ]]; then
+            STREAM_SVC=$(systemctl is-active birddog-stream 2>/dev/null)
+            echo "  Stream   : $STREAM_SVC"
+            if [[ -f "$BIRDDOG_ROOT/bdc/bdc.conf" ]]; then
+                source "$BIRDDOG_ROOT/bdc/bdc.conf"
+                echo "  BDM      : $BDM_HOST"
+                echo "  Cam      : $STREAM_NAME"
+            fi
+        fi
+        echo "  Commit   : $COMMIT"
+        echo "================================="
+        echo ""
+        ;;
     web)
         HOST=$(hostname)
         API="http://localhost:9997/v3/paths/list"
@@ -1425,6 +1472,7 @@ else:
         echo "  birddog configure   assign role and configure node"
         echo "  birddog reset       factory reset to unconfigured state"
         echo "  birddog verify      run node health check"
+        echo "  birddog status      quick node status summary"
         echo "  birddog web         show active camera streams"
         echo "  birddog radios      show radio interface layout"
         echo "  birddog version     show platform version"
