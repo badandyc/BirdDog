@@ -274,6 +274,7 @@ elif [[ "$CONFIRM" == "OVERRIDE" ]]; then
         echo "  Aborted."
         exit 0
     fi
+    CONFIRMED_IN_OVERRIDE=1
 
 elif [[ "$CONFIRM" == "N" ]]; then
     echo "  Aborted."
@@ -362,13 +363,19 @@ echo "-------------------------------------"
 if [[ "$ROLE" == "bdc" ]]; then
 
     # ── BDC node name confirmation ──
-    echo ""
-    echo "  Proposed BDC node:"
-    echo "    Hostname : $HOSTNAME_INPUT"
-    echo "    Mesh IP  : $MESH_IP"
-    echo "    Stream   : $STREAM_NAME"
-    echo ""
-    read -r -p "  Accept BDC node name? [Y]es / [N]o: " BDC_NAME_CONFIRM
+    # Skip if already confirmed via OVERRIDE in Phase 3
+    if [[ "${CONFIRMED_IN_OVERRIDE:-0}" == "1" ]]; then
+        echo "  BDC node confirmed in override — skipping"
+        BDC_NAME_CONFIRM="Y"
+    else
+        echo ""
+        echo "  Proposed BDC node:"
+        echo "    Hostname : $HOSTNAME_INPUT"
+        echo "    Mesh IP  : $MESH_IP"
+        echo "    Stream   : $STREAM_NAME"
+        echo ""
+        read -r -p "  Accept BDC node name? [Y]es / [N]o: " BDC_NAME_CONFIRM
+    fi
 
     if [[ "$BDC_NAME_CONFIRM" == "N" ]]; then
         echo ""
