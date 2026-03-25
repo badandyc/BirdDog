@@ -1406,13 +1406,11 @@ case "$1" in
             echo "  MediaMTX : $MEDIAMTX"
             if [[ "$MEDIAMTX" == "active" ]]; then
                 STREAM_JSON=$(curl -s --connect-timeout 2 http://localhost:9997/v3/paths/list 2>/dev/null)
-                LIVE_STREAMS=$(echo "$STREAM_JSON" | grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"//' | while read -r name; do
-                    echo "$STREAM_JSON" | grep -q ""name":"$name".*"ready":true" && echo "$name"
-                done | tr '
+                LIVE_COUNT=$(echo "$STREAM_JSON" | grep -o '"ready":true' | wc -l | tr -d ' ')
+                LIVE_NAMES=$(echo "$STREAM_JSON" | grep -o '"name":"[^"]*","confName[^}]*"ready":true' | grep -o '"name":"[^"]*"' | sed 's/"name":"//g;s/"//g' | tr '
 ' ' ' | sed 's/ $//')
-                LIVE_COUNT=$(echo "$STREAM_JSON" | grep -o '"ready":true' | wc -l)
                 if [[ "$LIVE_COUNT" -gt 0 ]]; then
-                    echo "  Streams  : $LIVE_COUNT live ($LIVE_STREAMS)"
+                    echo "  Streams  : $LIVE_COUNT live ($LIVE_NAMES)"
                 else
                     echo "  Streams  : 0 live"
                 fi
