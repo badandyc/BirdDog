@@ -1405,13 +1405,17 @@ case "$1" in
             MEDIAMTX=$(systemctl is-active mediamtx 2>/dev/null)
             echo "  MediaMTX : $MEDIAMTX"
             if [[ "$MEDIAMTX" == "active" ]]; then
-                STREAMS=$(curl -s --connect-timeout 2 http://localhost:9997/v3/paths/list 2>/dev/null | python3 -c "
-import sys,json
-d=json.load(sys.stdin)
-live=[i['name'] for i in d.get('items',[]) if i.get('ready')]
-print(f'{len(live)} live ({", ".join(live)})' if live else '0 live')
-" 2>/dev/null || echo "unknown")
-                echo "  Streams  : $STREAMS"
+                STREAM_JSON=$(curl -s --connect-timeout 2 http://localhost:9997/v3/paths/list 2>/dev/null)
+                LIVE_STREAMS=$(echo "$STREAM_JSON" | grep -o '"name":"[^"]*"' | sed 's/"name":"//;s/"//' | while read -r name; do
+                    echo "$STREAM_JSON" | grep -q ""name":"$name".*"ready":true" && echo "$name"
+                done | tr '
+' ' ' | sed 's/ $//')
+                LIVE_COUNT=$(echo "$STREAM_JSON" | grep -o '"ready":true' | wc -l)
+                if [[ "$LIVE_COUNT" -gt 0 ]]; then
+                    echo "  Streams  : $LIVE_COUNT live ($LIVE_STREAMS)"
+                else
+                    echo "  Streams  : 0 live"
+                fi
             fi
             echo "  Dashboard: http://${HOST}.local"
         elif [[ "$ROLE" == "BDC" ]]; then
