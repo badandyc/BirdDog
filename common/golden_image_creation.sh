@@ -1419,6 +1419,36 @@ case "$1" in
         echo "================================="
         echo ""
         ;;
+    mavlink)
+        HOST=$(hostname)
+        ROLE="unknown"
+        [[ "$HOST" =~ ^bdm-[0-9]{2}$ ]] && ROLE="BDM"
+        if [[ "$ROLE" != "BDM" ]]; then
+            echo "  birddog mavlink is only available on BDM nodes"
+            exit 1
+        fi
+        MAVLINK_CONF="/opt/birddog/bdm/mavlink.conf"
+        if [[ -f "$MAVLINK_CONF" ]]; then
+            source "$MAVLINK_CONF"
+            WLAN0_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP "(?<=inet )[^/]+" | head -1)
+            if [[ -n "$WLAN0_IP" && "$MAVLINK_ACTIVE" == "1" ]]; then
+                echo ""
+                echo "================================="
+                echo "MAVLink Bridge — ACTIVE"
+                echo "================================="
+                echo "  SSID   : $ELRS_SSID"
+                echo "  wlan0  : $WLAN0_IP (ELRS backpack)"
+                echo "  wlan2  : 10.10.10.1 (BirdDog AP)"
+                echo "  Ports  : UDP 14550 (telemetry) / 14555 (commands)"
+                echo "================================="
+                echo ""
+                exit 0
+            fi
+        fi
+        echo "  MAVLink bridge not active — running setup..."
+        echo ""
+        exec sudo bash "$BIRDDOG_ROOT/bdm/bdm_AP_setup.sh"
+        ;;
     web)
         HOST=$(hostname)
         API="http://localhost:9997/v3/paths/list"
@@ -1464,6 +1494,7 @@ else:
         echo "  birddog reset       factory reset to unconfigured state"
         echo "  birddog verify      run node health check"
         echo "  birddog status      quick node status summary"
+        echo "  birddog mavlink     ELRS backpack MAVLink bridge (BDM only)"
         echo "  birddog web         show active camera streams"
         echo "  birddog radios      show radio interface layout"
         echo "  birddog version     show platform version"
