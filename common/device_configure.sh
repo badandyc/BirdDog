@@ -31,6 +31,8 @@ echo "-------------------------------------"
 CURRENT_HOST=$(hostname)
 MESH_CONF="$BIRDDOG_ROOT/mesh/mesh.conf"
 
+SKIP_TO_INSTALLER=0
+
 if [[ "$CURRENT_HOST" =~ ^bd[cm]-[0-9]{2}$ && -f "$MESH_CONF" ]]; then
 
     source "$MESH_CONF"
@@ -43,36 +45,42 @@ if [[ "$CURRENT_HOST" =~ ^bd[cm]-[0-9]{2}$ && -f "$MESH_CONF" ]]; then
     echo "    Role     : $CURRENT_ROLE"
     echo "    Mesh IP  : $MESH_IP"
     echo ""
-    echo "  [K]eep current configuration"
-    echo "  [R]econfigure"
-    echo "  [N]o / abort"
+    echo "  [K]eep — re-run role installer with current settings"
+    echo "  [R]econfigure — full reconfiguration from scratch"
+    echo "  [N]o — abort"
     echo ""
-    read -r -p "  Choice: " KEEP_CHOICE
+
+    while true; do
+        read -r -p "  Choice: " KEEP_CHOICE
+        [[ "$KEEP_CHOICE" == "K" || "$KEEP_CHOICE" == "R" || "$KEEP_CHOICE" == "N" ]] && break
+        echo "  Invalid — enter K, R, or N"
+    done
 
     if [[ "$KEEP_CHOICE" == "K" ]]; then
         echo ""
-        echo "  Keeping existing configuration — no changes made."
-        echo ""
-        echo "====================================="
-        echo "Device configuration complete"
-        echo "  Hostname : $CURRENT_HOST"
-        echo "  Role     : $CURRENT_ROLE"
-        echo "  Mesh IP  : $MESH_IP"
-        echo "====================================="
-        exit 0
+        echo "  Keeping existing configuration — re-running role installer..."
+        # Load existing values so Phase 5 onwards works correctly
+        HOSTNAME_INPUT="$CURRENT_HOST"
+        ROLE="$CURRENT_ROLE"
+        NODE_NUM="$CURRENT_NODE"
+        STREAM_NAME="cam${NODE_NUM}"
+        MESH_IP=$(echo "$MESH_IP" | cut -d/ -f1)
+        if [[ -f "$BDC_CONFIG" ]]; then
+            source "$BDC_CONFIG"
+        fi
+        SKIP_TO_INSTALLER=1
     elif [[ "$KEEP_CHOICE" == "N" ]]; then
         echo "  Aborted."
         exit 0
-    elif [[ "$KEEP_CHOICE" == "R" ]]; then
-        echo "  Proceeding with reconfiguration..."
     else
-        echo "  Invalid selection — aborted."
-        exit 1
+        echo "  Proceeding with reconfiguration..."
     fi
 
 else
     echo "  No existing configuration detected — proceeding with fresh configure"
 fi
+
+if [[ "$SKIP_TO_INSTALLER" -eq 0 ]]; then
 
 # -------------------------------------------------------
 # Phase 1 — Role detection via hardware switch
@@ -83,15 +91,11 @@ echo "-------------------------------------"
 echo "Phase 1 — Role Detection"
 echo "-------------------------------------"
 
-# Read GPIO 5 using sysfs — no Python dependency needed here
-# Export pin if not already exported, suppress all errors cleanly
 if [[ ! -d /sys/class/gpio/gpio${GPIO_SWITCH} ]]; then
     echo "${GPIO_SWITCH}" > /sys/class/gpio/export 2>/dev/null || true
     sleep 0.2
 fi
 
-# Set direction only if the file exists — avoids noise on kernels
-# that auto-configure the pin direction
 if [[ -f /sys/class/gpio/gpio${GPIO_SWITCH}/direction ]]; then
     echo "in" > /sys/class/gpio/gpio${GPIO_SWITCH}/direction 2>/dev/null || true
 fi
@@ -120,7 +124,6 @@ echo "  Scanning mesh for existing $ROLE nodes..."
 AUTO_NODE=""
 
 if [[ "$ROLE" == "bdm" ]]; then
-    # BDM: scan 10.10.20.1 through 10.10.20.9
     for slot in $(seq 1 9); do
         TARGET="10.10.20.$slot"
         if ! ping -c1 -W1 "$TARGET" >/dev/null 2>&1; then
@@ -132,7 +135,6 @@ if [[ "$ROLE" == "bdm" ]]; then
         fi
     done
 else
-    # BDC: scan 10.10.20.10, .20 ... .230
     for slot in $(seq 1 23); do
         TARGET="10.10.20.$((slot * 10))"
         if ! ping -c1 -W1 "$TARGET" >/dev/null 2>&1; then
@@ -202,7 +204,6 @@ if [[ "$CONFIRM" == "Y" ]]; then
 elif [[ "$CONFIRM" == "OVERRIDE" ]]; then
     echo ""
 
-    # Ask for role first
     while true; do
         read -r -p "  Enter role (BDM or BDC): " OVERRIDE_ROLE_INPUT
         OVERRIDE_ROLE_INPUT=$(echo "$OVERRIDE_ROLE_INPUT" | tr '[:upper:]' '[:lower:]')
@@ -214,7 +215,6 @@ elif [[ "$CONFIRM" == "OVERRIDE" ]]; then
 
     ROLE="$OVERRIDE_ROLE_INPUT"
 
-    # Re-scan mesh for the overridden role
     echo ""
     echo "  Scanning mesh for existing $ROLE nodes..."
 
@@ -304,7 +304,6 @@ echo "-------------------------------------"
 echo "Phase 4 — Hostname + Host Table"
 echo "-------------------------------------"
 
-# Stop cloud-init from overwriting our hostname on next boot
 if [[ -f /etc/cloud/cloud-init.disabled ]] || [[ ! -d /etc/cloud ]]; then
     true
 elif [[ -f /etc/cloud/cloud.cfg ]]; then
@@ -328,14 +327,12 @@ ff02::2 ip6-allrouters
 # BDM nodes: .1-.9   BDC nodes: .10,.20,.30...
 EOF
 
-# BDM entries — node number as-is (.1 through .9)
 for slot in $(seq 1 9); do
     IP="10.10.20.$slot"
     BDM_NAME="bdm-$(printf "%02d" $slot)"
     echo "$IP $BDM_NAME" >> "$TMP_HOSTS"
 done
 
-# BDC entries — node number × 10 (.10 through .250)
 for slot in $(seq 1 25); do
     IP="10.10.20.$((slot * 10))"
     BDC_NAME="bdc-$(printf "%02d" $slot)"
@@ -353,6 +350,8 @@ systemctl enable avahi-daemon 2>/dev/null || true
 systemctl restart avahi-daemon
 echo "  avahi restarted"
 
+fi  # end SKIP_TO_INSTALLER=0 block
+
 # -------------------------------------------------------
 # Phase 5 — Role installer
 # -------------------------------------------------------
@@ -364,10 +363,11 @@ echo "-------------------------------------"
 
 if [[ "$ROLE" == "bdc" ]]; then
 
-    # ── BDC node name confirmation ──
-    # Skip if already confirmed via OVERRIDE in Phase 3
     if [[ "${CONFIRMED_IN_OVERRIDE:-0}" == "1" ]]; then
         echo "  BDC node confirmed in override — skipping"
+        BDC_NAME_CONFIRM="Y"
+    elif [[ "$SKIP_TO_INSTALLER" -eq 1 ]]; then
+        echo "  BDC node confirmed from existing config — skipping"
         BDC_NAME_CONFIRM="Y"
     else
         echo ""
@@ -403,7 +403,6 @@ if [[ "$ROLE" == "bdc" ]]; then
         exit 0
     fi
 
-    # ── BDM auto-detect ──
     echo ""
     echo "  Scanning mesh for BDM nodes..."
     AUTO_BDM=""
@@ -475,8 +474,6 @@ echo "-------------------------------------"
 echo "Phase 6 — Mesh"
 echo "-------------------------------------"
 
-# Write mesh.conf — runtime script reads this for the committed mesh IP
-# This replaces the bootstrap temp IP with the node permanent IP
 mkdir -p "$BIRDDOG_ROOT/mesh"
 
 cat > "$BIRDDOG_ROOT/mesh/mesh.conf" << EOF
@@ -485,7 +482,6 @@ EOF
 
 echo "  mesh.conf written — IP: $MESH_IP/24"
 
-# Restart mesh service so it picks up the committed IP immediately
 systemctl restart birddog-mesh.service
 
 echo "  Waiting for mesh service to start..."
