@@ -276,57 +276,36 @@ fi
 echo ""
 echo "================================="
 
+# ── determine status label ──
 if [[ "$FAIL" -eq 1 ]]; then
-    echo "NODE STATUS: FAILED"
-    echo "================================="
-    echo ""
-    echo "  Check LEDs on unit:"
-    echo "    White  — power     (on=bus powered)"
-    echo "    Yellow — bootstrap (solid=unconfigured or switch/role mismatch + SOS beep every 10s)"
-    echo "    Blue   — mesh      (off=down  slow-blink=joining  fast-blink=no peer  solid=joined)"
-    if [[ "$ROLE" == "BDM" ]]; then
-    echo "    Green  — mediamtx  (off=down  fast-blink=up/no streams  solid=streams active)"
-    else
-    echo "    Green  — stream    (off=failed  slow-blink=restarting  solid=streaming)"
-    fi
-    echo "    Red    — camera    (on=fault)"
-    echo ""
-    exit 1
+    STATUS="FAILED"
 elif [[ "$ROLE" == "UNKNOWN" ]]; then
-    echo "NODE STATUS: NOT CONFIGURED"
-    echo "================================="
-    echo ""
-    echo "  Yellow LED should be solid — node is in bootstrap state"
+    STATUS="NOT CONFIGURED"
+elif [[ "$WARN" -eq 1 ]]; then
+    STATUS="DEGRADED"
+else
+    STATUS="OPERATIONAL"
+fi
+
+echo "NODE STATUS: $STATUS"
+echo "================================="
+echo ""
+
+if [[ "$ROLE" == "UNKNOWN" ]]; then
     echo "  Run: birddog configure"
     echo ""
-    exit 0
-elif [[ "$WARN" -eq 1 ]]; then
-    echo "NODE STATUS: DEGRADED"
-    echo "================================="
-    echo ""
-    echo "  Check LEDs on unit:"
+else
+    echo "  LED reference:"
     echo "    White  — power     (on=bus powered)"
-    echo "    Yellow — bootstrap (solid=unconfigured or switch/role mismatch + SOS beep every 10s)"
+    echo "    Yellow — bootstrap (solid=unconfigured or switch/role mismatch + SOS every 30s)"
     echo "    Blue   — mesh      (off=down  slow-blink=joining  fast-blink=no peer  solid=joined)"
     if [[ "$ROLE" == "BDM" ]]; then
-    echo "    Green  — mediamtx  (off=down  fast-blink=up/no streams  solid=streams active)"
+        echo "    Green  — mediamtx  (off=down  fast-blink=up/no streams  solid=streams active)"
     else
-    echo "    Green  — stream    (off=failed  slow-blink=restarting  solid=streaming)"
+        echo "    Green  — stream    (off=failed  slow-blink=restarting  solid=streaming)"
     fi
     echo "    Red    — camera    (on=fault)"
     echo ""
-    exit 0
-else
-    echo "NODE STATUS: OPERATIONAL"
-    echo "================================="
-    echo ""
-    echo "  All systems nominal"
-    echo "  LEDs should show: yellow=off  blue=solid  red=off"
-    if [[ "$ROLE" == "BDM" ]]; then
-    echo "                    green=fast-blink (no streams) or solid (streams active)"
-    else
-    echo "                    green=solid"
-    fi
-    echo ""
-    exit 0
 fi
+
+[[ "$FAIL" -eq 1 ]] && exit 1 || exit 0
