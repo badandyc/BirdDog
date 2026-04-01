@@ -702,7 +702,7 @@ STATE_INTERVAL   = 3.0    # systemd checks every 3 seconds
 BLINK_SLOW       = 0.5    # 1Hz  — joining mesh
 BLINK_FAST       = 0.125  # 4Hz  — in mesh, no peer yet
 PRESS_SHORT      = 1.0    # 1s release — TBD
-PRESS_ROLL_CALL  = 5.0    # 5s hold — LED roll call
+PRESS_ROLL_CALL  = 4.0    # 5s hold — LED roll call
 LONG_PRESS_TIME  = 10.0   # 10s hold — shutdown
 
 # ── state ──
