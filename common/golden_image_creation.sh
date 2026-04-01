@@ -186,7 +186,6 @@ Type=oneshot
 # Block onboard wifi by driver name — index-based blocking is unreliable
 # across reboots and hardware configurations.
 # brcmfmac is the onboard Pi WiFi driver.
-# mt76x2u (mesh) and rtl8192cu (AP) are explicitly unblocked.
 ExecStart=/bin/bash -c '    for phy in /sys/class/ieee80211/*/; do         driver=$(basename $(readlink $phy/device/driver 2>/dev/null) 2>/dev/null);         name=$(cat $phy/name 2>/dev/null);         if [[ "$driver" == "brcmfmac" ]]; then             rfkill block "$name" 2>/dev/null || true;         fi;     done'
 RemainAfterExit=yes
 
@@ -617,9 +616,7 @@ fetch_file() {
     fi
 }
 
-# Fetch golden image first and flag if it changed —
-# the update runs the already-loaded version in memory so the
-# operator needs to know the on-disk version is now newer
+# Fetch golden image first and flag if it changed
 TMP_GI="/tmp/birddog_fetch_gi.$$"
 if curl -fsSL "https://raw.githubusercontent.com/badandyc/BirdDog/${REMOTE_COMMIT}/common/golden_image_creation.sh" -o "$TMP_GI" 2>/dev/null; then
     if cmp -s "$TMP_GI" "$BIRDDOG_ROOT/common/golden_image_creation.sh" 2>/dev/null; then
@@ -655,9 +652,6 @@ date -u +"%Y-%m-%dT%H:%M:%SZ" > "$BUILD_FILE"
 
 # --------------------------------------------------
 # PERMS + CLI + DAEMON (full install only)
-# Refresh mode stops after Phase 3 — scripts are already
-# fetched and up to date, no need to reinstall daemons
-# or bounce running services on a live node.
 # --------------------------------------------------
 
 if [[ "$BIRDDOG_MODE" == "full" ]]; then
@@ -705,14 +699,13 @@ PIN_SWITCH     = 5   # role switch: open=BDM, closed=BDC
 # ── timing ──
 LOOP_RATE        = 0.01   # 10ms main loop
 STATE_INTERVAL   = 3.0    # systemd checks every 3 seconds
-BLINK_SLOW       = 0.5    # 1Hz  — joining mesh (service up, not in mesh mode)
+BLINK_SLOW       = 0.5    # 1Hz  — joining mesh
 BLINK_FAST       = 0.125  # 4Hz  — in mesh, no peer yet
 PRESS_SHORT      = 1.0    # 1s release — TBD
 PRESS_ROLL_CALL  = 5.0    # 5s hold — LED roll call
 LONG_PRESS_TIME  = 10.0   # 10s hold — shutdown
 
 # ── state ──
-# led_blue_blink: 0=off  1=slow(joining)  2=fast(no peer)  3=solid
 led_blue_blink       = 0
 led_green_blink      = False
 last_state_check     = 0
@@ -721,7 +714,7 @@ last_blink_fast      = 0
 blink_phase_slow     = False
 blink_phase_fast     = False
 button_press_time    = None
-roll_call_fired      = False  # track if roll call already fired during this hold
+roll_call_fired      = False
 
 def setup():
     GPIO.setmode(GPIO.BCM)
@@ -737,7 +730,6 @@ def all_leds_off():
         GPIO.output(pin, GPIO.LOW)
 
 def beep(pattern):
-    # pattern: list of (on_time, off_time) tuples in seconds
     for on_t, off_t in pattern:
         GPIO.output(PIN_BUZZER, GPIO.HIGH)
         time.sleep(on_t)
@@ -751,28 +743,22 @@ def boot_beep():
 def shutdown_beep():
     beep([(1.0, 0)])
 
-def status_beep():
-    beep([(0.1, 0.15), (0.1, 0.15), (0.1, 0)])
-
 def role_beep_bdc():
-    # 1 long tone — BDC confirmed
     beep([(0.8, 0)])
 
 def role_beep_bdm():
-    # 2 long tones — BDM confirmed
     beep([(0.8, 0.3), (0.8, 0)])
 
 def sos_beep():
-    # SOS x2 — switch/config mismatch
     dot = 0.1
     dash = 0.3
     gap = 0.1
     letter_gap = 0.3
     word_gap = 0.6
     sos = [
-        (dot, gap), (dot, gap), (dot, letter_gap),   # S
-        (dash, gap), (dash, gap), (dash, letter_gap), # O
-        (dot, gap), (dot, gap), (dot, word_gap),      # S
+        (dot, gap), (dot, gap), (dot, letter_gap),
+        (dash, gap), (dash, gap), (dash, letter_gap),
+        (dot, gap), (dot, gap), (dot, word_gap),
     ]
     beep(sos)
     time.sleep(0.3)
@@ -791,11 +777,14 @@ def status_roll_call():
     for pin in [PIN_LED_BLUE, PIN_LED_GREEN, PIN_LED_YELLOW, PIN_LED_RED]:
         saved[pin] = GPIO.input(pin)
 
-    # All off
+    # 2 beeps to open
+    boot_beep()
+    time.sleep(0.1)
+
+    # All off then flash each LED in sequence
     all_leds_off()
     time.sleep(0.1)
 
-    # Flash each LED in sequence
     led_flash(PIN_LED_BLUE)
     time.sleep(0.1)
     led_flash(PIN_LED_GREEN)
@@ -805,19 +794,17 @@ def status_roll_call():
     led_flash(PIN_LED_RED)
     time.sleep(0.1)
 
-    # 3 quick buzzes
-    status_beep()
+    # 2 beeps to close
+    boot_beep()
 
     # Restore LED states
     for pin, state in saved.items():
         GPIO.output(pin, state)
 
 def read_role():
-    # open (high) = BDM, closed (low) = BDC
     return "bdm" if GPIO.input(PIN_SWITCH) == GPIO.HIGH else "bdc"
 
 def committed_role():
-    # Read committed role from hostname
     try:
         host = open('/etc/hostname').read().strip()
         if host.startswith('bdm-'):
@@ -829,7 +816,6 @@ def committed_role():
     return None
 
 def is_bootstrap():
-    # Node is in bootstrap state if hostname is unconfigured
     try:
         host = open('/etc/hostname').read().strip()
         return not (host.startswith('bdm-') or host.startswith('bdc-'))
@@ -900,17 +886,13 @@ def check_state():
     has_peer  = mesh_has_peer()
 
     if not mesh_svc or not wlan1_up:
-        # service down or adapter missing -- off
         led_blue_blink = 0
         GPIO.output(PIN_LED_BLUE, GPIO.LOW)
     elif not joined:
-        # service up, adapter present, not in mesh mode -- slow blink (joining)
         led_blue_blink = 1
     elif not has_peer:
-        # in mesh mode but no peer -- fast blink (searching)
         led_blue_blink = 2
     else:
-        # mesh joined with peer -- solid
         led_blue_blink = 3
         GPIO.output(PIN_LED_BLUE, GPIO.HIGH)
 
@@ -933,7 +915,6 @@ def check_state():
 def update_blink(now):
     global last_blink_slow, last_blink_fast, blink_phase_slow, blink_phase_fast
 
-    # slow blink (1Hz)
     if now - last_blink_slow >= BLINK_SLOW:
         blink_phase_slow = not blink_phase_slow
         last_blink_slow = now
@@ -942,7 +923,6 @@ def update_blink(now):
         if led_green_blink:
             GPIO.output(PIN_LED_GREEN, GPIO.HIGH if blink_phase_slow else GPIO.LOW)
 
-    # fast blink (4Hz)
     if now - last_blink_fast >= BLINK_FAST:
         blink_phase_fast = not blink_phase_fast
         last_blink_fast = now
@@ -960,12 +940,10 @@ def check_button(now):
     elif pressed and button_press_time is not None:
         held = now - button_press_time
 
-        # 5s hold — fire roll call once
         if held >= PRESS_ROLL_CALL and not roll_call_fired:
             status_roll_call()
             roll_call_fired = True
 
-        # 10s hold — shutdown
         if held >= LONG_PRESS_TIME:
             all_leds_off()
             GPIO.output(PIN_LED_RED, GPIO.HIGH)
@@ -982,21 +960,18 @@ def check_button(now):
         roll_call_fired = False
 
 def boot_sequence():
-    role_sw  = read_role()
+    role_sw   = read_role()
     bootstrap = is_bootstrap()
     role_cfg  = committed_role()
     mismatch  = (not bootstrap) and (role_cfg is not None) and (role_sw != role_cfg)
 
     if mismatch:
-        # switch/config mismatch — yellow on, SOS x2, safe state
         GPIO.output(PIN_LED_YELLOW, GPIO.HIGH)
         sos_beep()
     elif bootstrap:
-        # never configured — yellow on, boot beep
         GPIO.output(PIN_LED_YELLOW, GPIO.HIGH)
         boot_beep()
     else:
-        # configured and switch matches — role confirmation beep
         boot_beep()
         time.sleep(0.3)
         if role_sw == "bdc":
@@ -1013,14 +988,11 @@ def main():
 
     while True:
         now = time.time()
-
         check_button(now)
         update_blink(now)
-
         if now - last_state_check >= STATE_INTERVAL:
             check_state()
             last_state_check = now
-
         time.sleep(LOOP_RATE)
 
 if __name__ == "__main__":
@@ -1073,24 +1045,14 @@ cat > /usr/local/bin/birddog-mesh-join.sh <<'MESH_RUNTIME'
 LOG="/opt/birddog/mesh/mesh_runtime.log"
 MESH_CONF="/opt/birddog/mesh/mesh.conf"
 
-# ── Determine mesh IP ──
 if [[ -f "$MESH_CONF" ]]; then
     source "$MESH_CONF"
 else
-    # Bootstrap — no identity yet, pick random temp IP
     OCTET=$(( RANDOM % 24 + 231 ))
     MESH_IP="10.10.20.${OCTET}/24"
 fi
 
 MESH_IP="${MESH_IP:-10.10.20.254/24}"
-
-# State machine states:
-#   WAIT_INTERFACE  wlan1 not yet visible
-#   NORMALIZE       first join attempt in progress
-#   CONVERGING      joined, waiting for first peer
-#   STEADY          peer seen recently
-#   SUSPECT         no peer for SUSPECT_THRESHOLD seconds
-#   RECOVERY        no peer for RECOVERY_THRESHOLD seconds — rejoin
 
 STATE="INIT"
 LAST_PEER_TIME=0
@@ -1156,8 +1118,6 @@ normalize_and_join() {
     }
 
     ip addr replace "$MESH_IP" dev wlan1 >> "$LOG" 2>&1 || true
-
-    # Set RSSI threshold — reject direct peers weaker than -65 dBm
     iw dev wlan1 set mesh_param mesh_rssi_threshold -65 >> "$LOG" 2>&1 || true
 
     LAST_JOIN_TIME=$(date +%s)
@@ -1189,14 +1149,11 @@ check_for_peer() {
     echo "$PEER_FOUND"
 }
 
-# ── Main loop ──
-
 log "================================="
 log "Mesh runtime start"
 log "Hostname : $(hostname)"
 log "Mesh IP  : $MESH_IP"
 
-# Disable dhcpcd — we manage wlan1 addressing manually
 systemctl stop dhcpcd.service 2>/dev/null || true
 systemctl disable dhcpcd.service 2>/dev/null || true
 
@@ -1207,7 +1164,6 @@ log_state "$STATE"
 
 while true; do
 
-    # ---------- WAIT_INTERFACE ----------
     if ! interface_exists; then
         if [[ "$STATE" != "WAIT_INTERFACE" ]]; then
             STATE="WAIT_INTERFACE"
@@ -1217,7 +1173,6 @@ while true; do
         continue
     fi
 
-    # ---------- FIRST JOIN ----------
     if [[ "$STATE" == "WAIT_INTERFACE" ]]; then
         STATE="NORMALIZE"
         log_state "$STATE"
@@ -1226,7 +1181,6 @@ while true; do
         log_state "$STATE"
     fi
 
-    # ---------- HARD CORRECTNESS CHECK ----------
     if ! mesh_joined; then
         log "mesh membership lost"
         STATE="RECOVERY"
@@ -1235,7 +1189,6 @@ while true; do
 
     assign_ip_if_missing
 
-    # ---------- PEER DETECTION ----------
     PEER_FOUND=$(check_for_peer)
 
     NOW=$(date +%s)
@@ -1251,7 +1204,6 @@ while true; do
         LAST_PEER_TIME=$NOW
     fi
 
-    # ---------- STATE MACHINE ----------
     case "$STATE" in
 
         CONVERGING)
@@ -1286,7 +1238,6 @@ while true; do
 
     esac
 
-    # ---------- SLEEP BY STATE ----------
     case "$STATE" in
         CONVERGING) sleep 2  ;;
         SUSPECT)    sleep 5  ;;
@@ -1326,9 +1277,7 @@ systemctl daemon-reload
 systemctl enable birddog-mesh.service
 echo "  birddog-mesh.service installed and enabled"
 
-
 # ── BirdDog ASCII art ──
-# Written as a plain file to avoid quoting issues inside heredocs
 
 cat > /usr/local/bin/birddog_art <<'BIRDDOG_ART'
 oooooooooo.   o8o                 .o8  oooooooooo.
@@ -1391,7 +1340,6 @@ case "$1" in
         echo "BirdDog Status — $HOST"
         echo "================================="
         echo "  Role     : $ROLE"
-        # mesh
         MESH_SVC=$(systemctl is-active birddog-mesh 2>/dev/null)
         PEERS=$(iw dev wlan1 station dump 2>/dev/null | grep -c "^Station" || echo 0)
         MESH_IP=$(ip -4 addr show wlan1 2>/dev/null | grep -oP "(?<=inet )[^/]+" | head -1)
@@ -1400,15 +1348,13 @@ case "$1" in
         else
             echo "  Mesh     : down"
         fi
-        # role specific
         if [[ "$ROLE" == "BDM" ]]; then
             MEDIAMTX=$(systemctl is-active mediamtx 2>/dev/null)
             echo "  MediaMTX : $MEDIAMTX"
             if [[ "$MEDIAMTX" == "active" ]]; then
                 STREAM_JSON=$(curl -s --connect-timeout 2 http://localhost:9997/v3/paths/list 2>/dev/null)
                 LIVE_COUNT=$(echo "$STREAM_JSON" | grep -o '"ready":true' | wc -l | tr -d ' ')
-                LIVE_NAMES=$(echo "$STREAM_JSON" | grep -o '"name":"[^"]*","confName[^}]*"ready":true' | grep -o '"name":"[^"]*"' | sed 's/"name":"//g;s/"//g' | tr '
-' ' ' | sed 's/ $//')
+                LIVE_NAMES=$(echo "$STREAM_JSON" | grep -o '"name":"[^"]*","confName[^}]*"ready":true' | grep -o '"name":"[^"]*"' | sed 's/"name":"//g;s/"//g' | tr '\n' ' ' | sed 's/ $//')
                 if [[ "$LIVE_COUNT" -gt 0 ]]; then
                     echo "  Streams  : $LIVE_COUNT live ($LIVE_NAMES)"
                 else
@@ -1451,7 +1397,6 @@ else:
     for item in items:
         name = item.get('name','?')
         ready = item.get('ready', False)
-        status = 'LIVE' if ready else None
         if ready:
             print(f'  {name:<10} LIVE    rtsp://$HOST.local:8554/{name}')
 " 2>/dev/null)
