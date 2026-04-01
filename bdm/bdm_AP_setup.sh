@@ -23,10 +23,12 @@ AP_IP="10.10.10.1/24"
 SSID="BirdDog"
 PASSPHRASE="StrongPass123"
 
+ELRS_PASSWORD="expresslrs"
+ELRS_SSID_BASE="ExpressLRS TX Backpack"
+MAVLINK_CONF="/opt/birddog/bdm/mavlink.conf"
+
 # -------------------------------------------------------
 # Phase 1 — Write all network config files FIRST
-# before touching any running services.
-# This keeps eth0 / SSH alive during the transition.
 # -------------------------------------------------------
 
 echo ""
@@ -34,11 +36,6 @@ echo "=== Writing network configuration ==="
 
 mkdir -p /etc/systemd/network
 
-# Grab current eth0 IP before touching any services.
-# We hold it as a temporary static address so networkd keeps
-# the same IP through the NetworkManager → networkd transition.
-# SSH never drops because the address never changes.
-# After networkd is stable we switch back to pure DHCP.
 ETH0_IP=$(ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet )[^/]+' | head -1)
 ETH0_GW=$(ip route show default dev eth0 2>/dev/null | grep -oP '(?<=via )[^ ]+' | head -1)
 ETH0_PREFIX=$(ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet )[0-9.]+/\K[0-9]+' | head -1)
@@ -78,8 +75,6 @@ SendHostname=yes
 EOF
 fi
 
-# wlan1 — mesh backbone, managed by birddog-mesh.service
-# networkd should not touch it — unmanaged here
 cat > /etc/systemd/network/20-wlan1.network << EOF
 [Match]
 Name=wlan1
@@ -89,7 +84,6 @@ DHCP=no
 LinkLocalAddressing=no
 EOF
 
-# wlan2 — AP interface, static IP
 cat > /etc/systemd/network/30-wlan2.network << EOF
 [Match]
 Name=${AP_IF}
@@ -135,8 +129,6 @@ networkctl reconfigure eth0 2>/dev/null || true
 echo "  systemd-networkd active"
 echo "  eth0 holding current IP — SSH connection stable"
 
-# Give networkd a moment to fully take ownership of eth0,
-# then switch to pure DHCP so the lease renews cleanly
 sleep 3
 
 cat > /etc/systemd/network/10-eth0.network << EOF
@@ -171,7 +163,6 @@ if ip link show "${AP_IF}" >/dev/null 2>&1; then
     echo "  ${AP_IF} configured"
 else
     echo "  ${AP_IF} not present yet — will be available after reboot"
-    echo "  (radio mapping assigns wlan2 to Edimax adapter at boot)"
 fi
 
 # -------------------------------------------------------
@@ -267,6 +258,102 @@ if ip link show "${AP_IF}" >/dev/null 2>&1; then
 
 else
     echo "  ${AP_IF} not present — services will start automatically after reboot"
+fi
+
+# -------------------------------------------------------
+# Phase 8 — MAVLink bridge (ELRS backpack → BDM AP)
+# -------------------------------------------------------
+
+echo ""
+echo "=== MAVLink Bridge Setup ==="
+echo ""
+echo "  The ELRS TX backpack broadcasts MAVLink telemetry over WiFi."
+echo "  This bridges wlan0 to the BirdDog AP so Mission Planner"
+echo "  on the AP network receives drone telemetry automatically."
+echo ""
+echo "  [UID]  enter the 6-digit code from your backpack"
+echo "  [SSID] enter the full network name manually"
+echo "  [SKIP] skip MAVLink bridge setup"
+echo ""
+read -r -p "  Choice: " MAVLINK_INPUT
+
+if [[ "$MAVLINK_INPUT" == "SKIP" ]]; then
+    echo "  MAVLink bridge skipped"
+else
+    # Build SSID
+    if [[ "$MAVLINK_INPUT" =~ ^[0-9a-fA-F]{6}$ ]]; then
+        ELRS_SSID="${ELRS_SSID_BASE} ${MAVLINK_INPUT}"
+        echo "  SSID : $ELRS_SSID"
+    else
+        ELRS_SSID="$MAVLINK_INPUT"
+        echo "  SSID : $ELRS_SSID (manual)"
+    fi
+
+    # Unblock wlan0
+    rfkill unblock wifi 2>/dev/null || true
+
+    # Write wpa_supplicant config for the backpack
+    WPA_CONF="/tmp/birddog_elrs_wpa.conf"
+    cat > "$WPA_CONF" << EOF
+ctrl_interface=/var/run/wpa_supplicant
+update_config=0
+
+network={
+    ssid="${ELRS_SSID}"
+    psk="${ELRS_PASSWORD}"
+    key_mgmt=WPA-PSK
+}
+EOF
+
+    # Bring wlan0 up and connect — no internet check, no default route
+    ip link set wlan0 up 2>/dev/null || true
+
+    echo "  Connecting to $ELRS_SSID ..."
+    wpa_supplicant -B -i wlan0 -c "$WPA_CONF" -P /tmp/birddog_elrs_wpa.pid 2>/dev/null || true
+
+    # Request DHCP on wlan0 with high metric so it never becomes default route
+    dhclient -1 -timeout 8 -pf /tmp/birddog_elrs_dhcp.pid wlan0 2>/dev/null || true
+
+    # Verify connection
+    WLAN0_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet )[^/]+' | head -1)
+
+    if [[ -z "$WLAN0_IP" ]]; then
+        echo ""
+        echo "  WARNING: Could not connect to $ELRS_SSID"
+        echo "  Check UID/SSID and run: birddog mavlink"
+        echo "  wlan0 left unblocked — reboot to reset"
+    else
+        echo "  Connected — wlan0 IP: $WLAN0_IP"
+
+        # Remove any default route via wlan0 — we only want to forward, not route internet through it
+        ip route del default dev wlan0 2>/dev/null || true
+
+        # Enable IP forwarding
+        echo 1 > /proc/sys/net/ipv4/ip_forward
+
+        # Forward MAVLink UDP ports between wlan0 and wlan2
+        # 14550 — backpack sends telemetry
+        # 14555 — Mission Planner sends commands
+        iptables -A FORWARD -i wlan0 -o wlan2 -p udp --dport 14550 -j ACCEPT
+        iptables -A FORWARD -i wlan2 -o wlan0 -p udp --dport 14555 -j ACCEPT
+        iptables -t nat -A POSTROUTING -o wlan0 -j MASQUERADE
+        iptables -t nat -A POSTROUTING -o wlan2 -j MASQUERADE
+
+        # Save state for birddog mavlink status command
+        mkdir -p /opt/birddog/bdm
+        cat > "$MAVLINK_CONF" << EOF
+ELRS_SSID="${ELRS_SSID}"
+WLAN0_IP="${WLAN0_IP}"
+MAVLINK_ACTIVE=1
+EOF
+
+        echo ""
+        echo "  MAVLink bridge active"
+        echo "    wlan0  : $WLAN0_IP (ELRS backpack)"
+        echo "    wlan2  : 10.10.10.1 (BirdDog AP)"
+        echo "    Ports  : UDP 14550 (telemetry) / 14555 (commands)"
+        echo "    Connect Mission Planner to BirdDog AP → UDP 14550"
+    fi
 fi
 
 # -------------------------------------------------------
