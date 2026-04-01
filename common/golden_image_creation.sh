@@ -1413,6 +1413,9 @@ echo "  Connected — wlan0 IP: $WLAN0_IP"
 # Remove default route via wlan0 — forward only, never use as internet gateway
 ip route del default dev wlan0 2>/dev/null || true
 
+# Restore DNS — backpack DHCP pushes its own DNS which breaks internet access
+echo "nameserver 8.8.8.8" > /etc/resolv.conf
+
 # Enable IP forwarding
 echo 1 > /proc/sys/net/ipv4/ip_forward
 
