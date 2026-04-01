@@ -456,7 +456,7 @@ elif [[ "$ROLE" == "bdm" ]]; then
 
     echo ""
     echo "  Running BDM installer..."
-    bash "$BIRDDOG_ROOT/bdm/bdm_AP_setup.sh"
+    BIRDDOG_CONFIGURE=1 bash "$BIRDDOG_ROOT/bdm/bdm_AP_setup.sh"
     bash "$BIRDDOG_ROOT/bdm/bdm_mediamtx_setup.sh"
     bash "$BIRDDOG_ROOT/bdm/bdm_web_setup.sh"
 
