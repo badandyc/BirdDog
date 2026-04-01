@@ -763,8 +763,6 @@ def sos_beep():
         (dot, gap), (dot, gap), (dot, word_gap),
     ]
     beep(sos)
-    time.sleep(0.3)
-    beep(sos)
 
 def led_flash(pin, times=3, on_time=0.1, off_time=0.1):
     for _ in range(times):
