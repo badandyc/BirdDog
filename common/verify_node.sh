@@ -71,8 +71,6 @@ fi
 
 # -------------------------------------------------------
 # Radio layout
-# udev assigns names by driver — wlan0 is onboard (blocked),
-# wlan1 is mesh (Comfast), wlan2 is AP (Edimax, BDM only)
 # -------------------------------------------------------
 
 echo ""
@@ -118,7 +116,6 @@ else
     warn "birddog-mesh service not running"
 fi
 
-# Check interface type — mesh daemon sets type to "mesh point"
 WLAN1_TYPE=$(iw dev wlan1 info 2>/dev/null | awk '/type/{print $2}')
 if [[ "$WLAN1_TYPE" == "mesh" ]]; then
     pass "wlan1 in mesh mode"
@@ -134,10 +131,8 @@ if [[ "$ROLE" != "UNKNOWN" ]]; then
     fi
 fi
 
-# Check for at least one reachable mesh peer (only meaningful when configured)
 if [[ "$ROLE" != "UNKNOWN" ]]; then
     PEER_FOUND=0
-    # Scan BDM slots (.1-.9) and BDC slots (.10,.20,.30,.40,.50)
     for TARGET in 10.10.20.1 10.10.20.2 10.10.20.3 10.10.20.4 10.10.20.5 \
                   10.10.20.10 10.10.20.20 10.10.20.30 10.10.20.40 10.10.20.50; do
         [[ "$TARGET" == "$MESH_IP" ]] && continue
@@ -238,7 +233,6 @@ if [[ "$ROLE" == "BDC" ]]; then
     echo "---------------------------------"
 
     if [[ -f "$BIRDDOG_ROOT/bdc/bdc.conf" ]]; then
-        # shellcheck source=/dev/null
         source "$BIRDDOG_ROOT/bdc/bdc.conf"
         pass "BDC config present"
         echo "     BDM Host  : $BDM_HOST"
@@ -288,9 +282,13 @@ if [[ "$FAIL" -eq 1 ]]; then
     echo ""
     echo "  Check LEDs on unit:"
     echo "    White  — power     (on=bus powered)"
-    echo "    Yellow — bootstrap (solid=unconfigured or switch/role mismatch)"
+    echo "    Yellow — bootstrap (solid=unconfigured or switch/role mismatch + SOS beep every 10s)"
     echo "    Blue   — mesh      (off=down  slow-blink=joining  fast-blink=no peer  solid=joined)"
-    echo "    Green  — stream    (off=failed  blink=restarting  solid=ok)"
+    if [[ "$ROLE" == "BDM" ]]; then
+    echo "    Green  — mediamtx  (off=down  fast-blink=up/no streams  solid=streams active)"
+    else
+    echo "    Green  — stream    (off=failed  slow-blink=restarting  solid=streaming)"
+    fi
     echo "    Red    — camera    (on=fault)"
     echo ""
     exit 1
@@ -308,9 +306,13 @@ elif [[ "$WARN" -eq 1 ]]; then
     echo ""
     echo "  Check LEDs on unit:"
     echo "    White  — power     (on=bus powered)"
-    echo "    Yellow — bootstrap (solid=unconfigured or switch/role mismatch)"
+    echo "    Yellow — bootstrap (solid=unconfigured or switch/role mismatch + SOS beep every 10s)"
     echo "    Blue   — mesh      (off=down  slow-blink=joining  fast-blink=no peer  solid=joined)"
-    echo "    Green  — stream    (off=failed  blink=restarting  solid=ok)"
+    if [[ "$ROLE" == "BDM" ]]; then
+    echo "    Green  — mediamtx  (off=down  fast-blink=up/no streams  solid=streams active)"
+    else
+    echo "    Green  — stream    (off=failed  slow-blink=restarting  solid=streaming)"
+    fi
     echo "    Red    — camera    (on=fault)"
     echo ""
     exit 0
@@ -319,7 +321,12 @@ else
     echo "================================="
     echo ""
     echo "  All systems nominal"
-    echo "  LEDs should show: yellow=off  blue=solid  green=solid  red=off"
+    echo "  LEDs should show: yellow=off  blue=solid  red=off"
+    if [[ "$ROLE" == "BDM" ]]; then
+    echo "                    green=fast-blink (no streams) or solid (streams active)"
+    else
+    echo "                    green=solid"
+    fi
     echo ""
     exit 0
 fi
