@@ -685,7 +685,7 @@ import RPi.GPIO as GPIO
 import time
 import subprocess
 import os
-import random
+import json
 
 # ── GPIO pin assignments ──
 PIN_LED_BLUE   = 17
@@ -699,15 +699,15 @@ PIN_SWITCH     = 5   # role switch: open=BDM, closed=BDC
 # ── timing ──
 LOOP_RATE        = 0.01   # 10ms main loop
 STATE_INTERVAL   = 3.0    # systemd checks every 3 seconds
-BLINK_SLOW       = 0.5    # 1Hz  — joining mesh
-BLINK_FAST       = 0.125  # 4Hz  — in mesh, no peer yet
-PRESS_SHORT      = 1.0    # 1s release — TBD
-PRESS_ROLL_CALL  = 4.0    # 5s hold — LED roll call
+BLINK_SLOW       = 0.5    # 1Hz  — joining mesh / stream restarting
+BLINK_FAST       = 0.125  # 4Hz  — in mesh no peer / mediamtx up no streams
+PRESS_ROLL_CALL  = 4.0    # 4s hold — LED roll call
 LONG_PRESS_TIME  = 10.0   # 10s hold — shutdown
+SOS_INTERVAL     = 10.0   # seconds between periodic SOS on mismatch
 
 # ── state ──
 led_blue_blink       = 0
-led_green_blink      = False
+led_green_blink      = 0   # 0=off 1=slow 2=fast 3=solid
 last_state_check     = 0
 last_blink_slow      = 0
 last_blink_fast      = 0
@@ -715,6 +715,8 @@ blink_phase_slow     = False
 blink_phase_fast     = False
 button_press_time    = None
 roll_call_fired      = False
+last_sos_time        = 0
+current_mismatch     = False
 
 def setup():
     GPIO.setmode(GPIO.BCM)
@@ -772,16 +774,13 @@ def led_flash(pin, times=3, on_time=0.1, off_time=0.1):
         time.sleep(off_time)
 
 def status_roll_call():
-    # Save current LED states
     saved = {}
     for pin in [PIN_LED_BLUE, PIN_LED_GREEN, PIN_LED_YELLOW, PIN_LED_RED]:
         saved[pin] = GPIO.input(pin)
 
-    # 2 beeps to open
     boot_beep()
     time.sleep(0.1)
 
-    # All off then flash each LED in sequence
     all_leds_off()
     time.sleep(0.1)
 
@@ -794,10 +793,8 @@ def status_roll_call():
     led_flash(PIN_LED_RED)
     time.sleep(0.1)
 
-    # 2 beeps to close
     boot_beep()
 
-    # Restore LED states
     for pin, state in saved.items():
         GPIO.output(pin, state)
 
@@ -865,19 +862,43 @@ def mesh_has_peer():
 def camera_ok():
     return os.path.exists("/dev/video0") or os.path.exists("/dev/v4l/by-id")
 
+def mediamtx_stream_count():
+    # Query mediamtx API for active stream count
+    # Returns (service_running, stream_count)
+    try:
+        result = subprocess.run(
+            ["curl", "-s", "--connect-timeout", "1",
+             "http://localhost:9997/v3/paths/list"],
+            capture_output=True, text=True, timeout=3
+        )
+        if result.returncode != 0:
+            return False, 0
+        data = json.loads(result.stdout)
+        count = sum(1 for item in data.get("items", []) if item.get("ready"))
+        return True, count
+    except Exception:
+        return False, 0
+
 def check_state():
-    global led_blue_blink, led_green_blink
+    global led_blue_blink, led_green_blink, current_mismatch, last_sos_time
 
     # ── yellow: bootstrap / mismatch ──
     bootstrap = is_bootstrap()
     role_sw   = read_role()
     role_cfg  = committed_role()
     mismatch  = (not bootstrap) and (role_cfg is not None) and (role_sw != role_cfg)
+    current_mismatch = mismatch
 
     if bootstrap or mismatch:
         GPIO.output(PIN_LED_YELLOW, GPIO.HIGH)
     else:
         GPIO.output(PIN_LED_YELLOW, GPIO.LOW)
+
+    # ── periodic SOS on mismatch ──
+    now = time.time()
+    if mismatch and (now - last_sos_time >= SOS_INTERVAL):
+        last_sos_time = now
+        sos_beep()
 
     # ── blue: mesh ──
     mesh_svc  = service_active("birddog-mesh")
@@ -889,25 +910,43 @@ def check_state():
         led_blue_blink = 0
         GPIO.output(PIN_LED_BLUE, GPIO.LOW)
     elif not joined:
-        led_blue_blink = 1
+        led_blue_blink = 1   # slow blink — joining
     elif not has_peer:
-        led_blue_blink = 2
+        led_blue_blink = 2   # fast blink — no peer
     else:
-        led_blue_blink = 3
+        led_blue_blink = 3   # solid — joined with peer
         GPIO.output(PIN_LED_BLUE, GPIO.HIGH)
 
-    # ── green: stream ──
-    stream_active     = service_active("birddog-stream")
-    stream_activating = service_activating("birddog-stream")
+    # ── green: role-dependent ──
+    role = committed_role() or read_role()
 
-    if stream_activating:
-        led_green_blink = True
-    elif stream_active:
-        led_green_blink = False
-        GPIO.output(PIN_LED_GREEN, GPIO.HIGH)
+    if role == "bdm":
+        # BDM: reflect mediamtx state and stream count
+        mtx_running, stream_count = mediamtx_stream_count()
+        if not mtx_running:
+            # mediamtx not running — off
+            led_green_blink = 0
+            GPIO.output(PIN_LED_GREEN, GPIO.LOW)
+        elif stream_count == 0:
+            # mediamtx up, no active streams — fast blink (waiting for cameras)
+            led_green_blink = 2
+        else:
+            # mediamtx up with active streams — solid
+            led_green_blink = 0
+            GPIO.output(PIN_LED_GREEN, GPIO.HIGH)
     else:
-        led_green_blink = False
-        GPIO.output(PIN_LED_GREEN, GPIO.LOW)
+        # BDC: reflect birddog-stream service state
+        stream_active     = service_active("birddog-stream")
+        stream_activating = service_activating("birddog-stream")
+
+        if stream_activating:
+            led_green_blink = 1   # slow blink — restarting
+        elif stream_active:
+            led_green_blink = 0
+            GPIO.output(PIN_LED_GREEN, GPIO.HIGH)
+        else:
+            led_green_blink = 0
+            GPIO.output(PIN_LED_GREEN, GPIO.LOW)
 
     # ── red: camera ──
     GPIO.output(PIN_LED_RED, GPIO.LOW if camera_ok() else GPIO.HIGH)
@@ -920,7 +959,7 @@ def update_blink(now):
         last_blink_slow = now
         if led_blue_blink == 1:
             GPIO.output(PIN_LED_BLUE, GPIO.HIGH if blink_phase_slow else GPIO.LOW)
-        if led_green_blink:
+        if led_green_blink == 1:
             GPIO.output(PIN_LED_GREEN, GPIO.HIGH if blink_phase_slow else GPIO.LOW)
 
     if now - last_blink_fast >= BLINK_FAST:
@@ -928,6 +967,8 @@ def update_blink(now):
         last_blink_fast = now
         if led_blue_blink == 2:
             GPIO.output(PIN_LED_BLUE, GPIO.HIGH if blink_phase_fast else GPIO.LOW)
+        if led_green_blink == 2:
+            GPIO.output(PIN_LED_GREEN, GPIO.HIGH if blink_phase_fast else GPIO.LOW)
 
 def check_button(now):
     global button_press_time, roll_call_fired
@@ -954,12 +995,13 @@ def check_button(now):
     elif not pressed and button_press_time is not None:
         held = now - button_press_time
         if held >= 0.05 and held < PRESS_ROLL_CALL:
-            # short press under 5s — TBD
+            # short press under 4s — TBD
             pass
         button_press_time = None
         roll_call_fired = False
 
 def boot_sequence():
+    global last_sos_time
     role_sw   = read_role()
     bootstrap = is_bootstrap()
     role_cfg  = committed_role()
@@ -968,6 +1010,8 @@ def boot_sequence():
     if mismatch:
         GPIO.output(PIN_LED_YELLOW, GPIO.HIGH)
         sos_beep()
+        sos_beep()
+        last_sos_time = time.time()  # reset timer after boot SOS x2
     elif bootstrap:
         GPIO.output(PIN_LED_YELLOW, GPIO.HIGH)
         boot_beep()
