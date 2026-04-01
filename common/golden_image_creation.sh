@@ -1375,6 +1375,14 @@ network={
 }
 EOF
 
+# Clean up any leftover wpa_supplicant state from previous attempts
+pkill -f "wpa_supplicant.*wlan0" 2>/dev/null || true
+rm -f /var/run/wpa_supplicant/wlan0 /tmp/birddog_elrs_wpa.pid 2>/dev/null || true
+sleep 1
+
+# Cycle interface to clear driver state
+ip link set wlan0 down 2>/dev/null || true
+sleep 1
 ip link set wlan0 up 2>/dev/null || true
 sleep 1
 
