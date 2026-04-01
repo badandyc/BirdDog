@@ -763,6 +763,8 @@ def sos_beep():
         (dot, gap), (dot, gap), (dot, word_gap),
     ]
     beep(sos)
+    time.sleep(0.3)
+    beep(sos)
 
 def led_flash(pin, times=3, on_time=0.1, off_time=0.1):
     for _ in range(times):
@@ -993,8 +995,8 @@ def check_button(now):
     elif not pressed and button_press_time is not None:
         held = now - button_press_time
         if held >= 0.05 and held < PRESS_ROLL_CALL:
-            # short press under 4s — TBD
-            pass
+            # short press — alive confirmation beep
+            beep([(2.0, 0)])
         button_press_time = None
         roll_call_fired = False
 
@@ -1007,6 +1009,7 @@ def boot_sequence():
 
     if mismatch:
         GPIO.output(PIN_LED_YELLOW, GPIO.HIGH)
+        sos_beep()
         sos_beep()
         last_sos_time = time.time()  # reset timer after boot SOS x2
     elif bootstrap:
