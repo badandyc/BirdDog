@@ -266,16 +266,24 @@ fi
 
 echo ""
 echo "=== MAVLink Bridge Setup ==="
-echo ""
-echo "  The ELRS TX backpack broadcasts MAVLink telemetry over WiFi."
-echo "  This bridges wlan0 to the BirdDog AP so Mission Planner"
-echo "  on the AP network receives drone telemetry automatically."
-echo ""
-echo "  [UID]  enter the 6-digit code from your backpack"
-echo "  [SSID] enter the full network name manually"
-echo "  [SKIP] skip MAVLink bridge setup"
-echo ""
-read -r -p "  Choice: " MAVLINK_INPUT
+
+# Auto-skip when called from device_configure (BIRDDOG_CONFIGURE=1)
+# Operator runs 'birddog mavlink' manually when backpack is present
+if [[ "${BIRDDOG_CONFIGURE:-0}" == "1" ]]; then
+    echo "  Auto-skipped during configure — run: birddog mavlink"
+    MAVLINK_INPUT="SKIP"
+else
+    echo ""
+    echo "  The ELRS TX backpack broadcasts MAVLink telemetry over WiFi."
+    echo "  This bridges wlan0 to the BirdDog AP so Mission Planner"
+    echo "  on the AP network receives drone telemetry automatically."
+    echo ""
+    echo "  [UID]  enter the 6-digit code from your backpack"
+    echo "  [SSID] enter the full network name manually"
+    echo "  [SKIP] skip MAVLink bridge setup"
+    echo ""
+    read -r -p "  Choice: " MAVLINK_INPUT
+fi
 
 if [[ "$MAVLINK_INPUT" == "SKIP" ]]; then
     echo "  MAVLink bridge skipped"
