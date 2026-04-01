@@ -1365,13 +1365,18 @@ sleep 1
 # Write wpa_supplicant config
 WPA_CONF="/tmp/birddog_elrs_wpa.conf"
 cat > "$WPA_CONF" << EOF
-ctrl_interface=/var/run/wpa_supplicant
+ctrl_interface=/tmp/birddog_wpa_ctrl
 update_config=0
+p2p_disabled=1
+device_type=1-0050F204-1
 
 network={
     ssid="${ELRS_SSID}"
     psk="${ELRS_PASSWORD}"
     key_mgmt=WPA-PSK
+    proto=RSN
+    pairwise=CCMP
+    group=CCMP
 }
 EOF
 
