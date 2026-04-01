@@ -1303,6 +1303,125 @@ MESH_RUNTIME
 chmod +x /usr/local/bin/birddog-mesh-join.sh
 echo "  birddog-mesh-join.sh installed → /usr/local/bin/birddog-mesh-join.sh"
 
+# ── birddog-mavlink-bridge.sh ──
+
+cat > /usr/local/bin/birddog-mavlink-bridge.sh <<'MAVLINK_BRIDGE'
+#!/bin/bash
+
+# BirdDog MAVLink Bridge
+# Connects wlan0 to ELRS TX backpack AP and forwards
+# MAVLink UDP ports to the BirdDog AP (wlan2).
+# Not persistent — reboot resets wlan0 to blocked state.
+
+ELRS_PASSWORD="expresslrs"
+ELRS_SSID_BASE="ExpressLRS TX Backpack"
+MAVLINK_CONF="/opt/birddog/bdm/mavlink.conf"
+
+if [[ "$EUID" -ne 0 ]]; then
+    exec sudo bash /usr/local/bin/birddog-mavlink-bridge.sh "$@"
+fi
+
+echo ""
+echo "================================="
+echo "BirdDog MAVLink Bridge"
+echo "================================="
+echo ""
+echo "  The ELRS TX backpack broadcasts MAVLink telemetry over WiFi."
+echo "  This bridges wlan0 to the BirdDog AP so Mission Planner"
+echo "  on the AP network receives drone telemetry on UDP 14550."
+echo ""
+echo "  [UID]  enter the 6-digit code shown on your backpack"
+echo "  [SSID] enter the full network name manually"
+echo "  [SKIP] cancel"
+echo ""
+read -r -p "  Choice: " MAVLINK_INPUT
+
+if [[ "$MAVLINK_INPUT" == "SKIP" ]]; then
+    echo "  Cancelled."
+    exit 0
+fi
+
+# Build SSID
+if [[ "$MAVLINK_INPUT" =~ ^[0-9a-fA-F]{6}$ ]]; then
+    ELRS_SSID="${ELRS_SSID_BASE} ${MAVLINK_INPUT}"
+    echo "  SSID : $ELRS_SSID"
+else
+    ELRS_SSID="$MAVLINK_INPUT"
+    echo "  SSID : $ELRS_SSID (manual)"
+fi
+
+# Unblock wlan0
+rfkill unblock wifi 2>/dev/null || true
+sleep 1
+
+# Write wpa_supplicant config
+WPA_CONF="/tmp/birddog_elrs_wpa.conf"
+cat > "$WPA_CONF" << EOF
+ctrl_interface=/var/run/wpa_supplicant
+update_config=0
+
+network={
+    ssid="${ELRS_SSID}"
+    psk="${ELRS_PASSWORD}"
+    key_mgmt=WPA-PSK
+}
+EOF
+
+ip link set wlan0 up 2>/dev/null || true
+sleep 1
+
+echo "  Connecting to $ELRS_SSID ..."
+wpa_supplicant -B -i wlan0 -c "$WPA_CONF" -P /tmp/birddog_elrs_wpa.pid 2>/dev/null || true
+
+# DHCP with 8 second timeout — fail fast
+dhclient -1 -timeout 8 -pf /tmp/birddog_elrs_dhcp.pid wlan0 2>/dev/null || true
+
+WLAN0_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet )[^/]+' | head -1)
+
+if [[ -z "$WLAN0_IP" ]]; then
+    echo ""
+    echo "  Could not connect to $ELRS_SSID"
+    echo "  Check UID/SSID and try again — reboot to reset wlan0"
+    exit 1
+fi
+
+echo "  Connected — wlan0 IP: $WLAN0_IP"
+
+# Remove default route via wlan0 — forward only, never use as internet gateway
+ip route del default dev wlan0 2>/dev/null || true
+
+# Enable IP forwarding
+echo 1 > /proc/sys/net/ipv4/ip_forward
+
+# Forward MAVLink UDP ports between wlan0 and wlan2
+iptables -A FORWARD -i wlan0 -o wlan2 -p udp --dport 14550 -j ACCEPT
+iptables -A FORWARD -i wlan2 -o wlan0 -p udp --dport 14555 -j ACCEPT
+iptables -t nat -A POSTROUTING -o wlan0 -j MASQUERADE
+iptables -t nat -A POSTROUTING -o wlan2 -j MASQUERADE
+
+# Save state for status check
+mkdir -p /opt/birddog/bdm
+cat > "$MAVLINK_CONF" << EOF
+ELRS_SSID="${ELRS_SSID}"
+WLAN0_IP="${WLAN0_IP}"
+MAVLINK_ACTIVE=1
+EOF
+
+echo ""
+echo "================================="
+echo "MAVLink Bridge Active"
+echo "================================="
+echo "  wlan0  : $WLAN0_IP (ELRS backpack)"
+echo "  wlan2  : 10.10.10.1 (BirdDog AP)"
+echo "  Ports  : UDP 14550 (telemetry) / 14555 (commands)"
+echo "  Connect Mission Planner to BirdDog AP → UDP 14550"
+echo "================================="
+echo ""
+MAVLINK_BRIDGE
+
+chmod +x /usr/local/bin/birddog-mavlink-bridge.sh
+echo "  birddog-mavlink-bridge.sh installed → /usr/local/bin/birddog-mavlink-bridge.sh"
+
 cat > /etc/systemd/system/birddog-mesh.service << 'MESH_SVC'
 [Unit]
 Description=BirdDog Mesh Runtime
@@ -1447,9 +1566,7 @@ case "$1" in
                 exit 0
             fi
         fi
-        echo "  MAVLink bridge not active — running setup..."
-        echo ""
-        exec sudo bash "$BIRDDOG_ROOT/bdm/bdm_AP_setup.sh"
+        exec sudo bash /usr/local/bin/birddog-mavlink-bridge.sh
         ;;
     web)
         HOST=$(hostname)
