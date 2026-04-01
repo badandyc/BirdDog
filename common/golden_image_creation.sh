@@ -1375,8 +1375,8 @@ network={
     psk="${ELRS_PASSWORD}"
     key_mgmt=WPA-PSK
     proto=RSN
-    pairwise=CCMP
-    group=CCMP
+    pairwise=CCMP TKIP
+    group=TKIP
 }
 EOF
 
