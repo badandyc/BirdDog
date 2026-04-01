@@ -67,28 +67,28 @@ if [[ -z "$BIRDDOG_MODE" ]]; then
     echo ""
 
     if [[ "$PRECHECK_PASS" -eq 1 ]]; then
-        echo "  [F] Full install  (system verified — full install not required)"
+        echo "  [R] Re-install  (system verified — re-install not required)"
     else
-        echo "  [F] Full install"
+        echo "  [R] Re-install"
         echo ""
-        echo "  System check — full install recommended:"
+        echo "  System check — re-install recommended:"
         for NOTE in "${PRECHECK_NOTES[@]}"; do
             echo "    • $NOTE"
         done
         echo ""
     fi
 
-    echo "  [R] Refresh (scripts only)"
     echo "  [X] Exit"
+    echo ""
+    echo "  To refresh scripts only: birddog update"
     echo ""
 
     while true; do
         read -r -p "Choice: " MODE
         case "$MODE" in
-            F) BIRDDOG_MODE="full"    ; break ;;
-            R) BIRDDOG_MODE="refresh" ; break ;;
+            R) BIRDDOG_MODE="full"    ; break ;;
             X) echo "Exiting."; exit 0 ;;
-            *) echo "  Invalid — enter F, R, or X" ;;
+            *) echo "  Invalid — enter R or X" ;;
         esac
     done
 fi
