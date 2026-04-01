@@ -1330,24 +1330,32 @@ echo "  The ELRS TX backpack broadcasts MAVLink telemetry over WiFi."
 echo "  This bridges wlan0 to the BirdDog AP so Mission Planner"
 echo "  on the AP network receives drone telemetry on UDP 14550."
 echo ""
-echo "  [UID]  enter the 6-digit code shown on your backpack"
-echo "  [SSID] enter the full network name manually"
-echo "  [SKIP] cancel"
+echo "  [UID]  — enter 6-digit code from backpack"
+echo "  [SSID] — enter full network name manually"
+echo "  [X]    — cancel"
 echo ""
-read -r -p "  Choice: " MAVLINK_INPUT
 
-if [[ "$MAVLINK_INPUT" == "SKIP" ]]; then
+while true; do
+    read -r -p "  Choice: " MODE_INPUT
+    [[ "$MODE_INPUT" == "UID" || "$MODE_INPUT" == "SSID" || "$MODE_INPUT" == "X" ]] && break
+    echo "  Invalid — enter UID, SSID, or X"
+done
+
+if [[ "$MODE_INPUT" == "X" ]]; then
     echo "  Cancelled."
     exit 0
-fi
-
-# Build SSID
-if [[ "$MAVLINK_INPUT" =~ ^[0-9a-fA-F]{6}$ ]]; then
+elif [[ "$MODE_INPUT" == "UID" ]]; then
+    while true; do
+        read -r -p "  Enter 6-digit UID: " MAVLINK_INPUT
+        [[ "$MAVLINK_INPUT" =~ ^[0-9a-fA-F]{6}$ ]] && break
+        echo "  Invalid — must be exactly 6 hex characters (e.g. a1b2c3)"
+    done
     ELRS_SSID="${ELRS_SSID_BASE} ${MAVLINK_INPUT}"
     echo "  SSID : $ELRS_SSID"
 else
+    read -r -p "  Enter full SSID: " MAVLINK_INPUT
     ELRS_SSID="$MAVLINK_INPUT"
-    echo "  SSID : $ELRS_SSID (manual)"
+    echo "  SSID : $ELRS_SSID"
 fi
 
 # Unblock wlan0
