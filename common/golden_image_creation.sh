@@ -1396,8 +1396,11 @@ echo "  Connecting to $ELRS_SSID ..."
 # Use separate ctrl interface dir to avoid conflict with system wpa_supplicant service
 wpa_supplicant -B -i wlan0 -c "$WPA_CONF" -P /tmp/birddog_elrs_wpa.pid -C /tmp/birddog_wpa_ctrl 2>/dev/null || true
 
-# DHCP with 8 second timeout — fail fast
-dhclient -1 -timeout 8 -pf /tmp/birddog_elrs_dhcp.pid wlan0 2>/dev/null || true
+# Request DHCP — kill any existing dhcpcd first for clean start
+killall dhcpcd 2>/dev/null || true
+sleep 1
+dhcpcd wlan0 2>/dev/null || true
+sleep 5
 
 WLAN0_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet )[^/]+' | head -1)
 
