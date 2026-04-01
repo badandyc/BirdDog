@@ -81,14 +81,16 @@ if [[ -z "$BIRDDOG_MODE" ]]; then
     echo "  [R] Refresh (scripts only)"
     echo "  [X] Exit"
     echo ""
-    read -r -p "Choice: " MODE
 
-    case "$MODE" in
-        F|f) BIRDDOG_MODE="full" ;;
-        R|r) BIRDDOG_MODE="refresh" ;;
-        X|x) echo "Exiting."; exit 0 ;;
-        *) echo "Invalid selection"; exit 1 ;;
-    esac
+    while true; do
+        read -r -p "Choice: " MODE
+        case "$MODE" in
+            F) BIRDDOG_MODE="full"    ; break ;;
+            R) BIRDDOG_MODE="refresh" ; break ;;
+            X) echo "Exiting."; exit 0 ;;
+            *) echo "  Invalid — enter F, R, or X" ;;
+        esac
+    done
 fi
 
 echo "Mode: $BIRDDOG_MODE"
