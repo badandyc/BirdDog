@@ -1010,7 +1010,6 @@ def boot_sequence():
     if mismatch:
         GPIO.output(PIN_LED_YELLOW, GPIO.HIGH)
         sos_beep()
-        sos_beep()
         last_sos_time = time.time()  # reset timer after boot SOS x2
     elif bootstrap:
         GPIO.output(PIN_LED_YELLOW, GPIO.HIGH)
