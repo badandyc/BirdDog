@@ -26,7 +26,7 @@ PRECHECK_NOTES=()
 
 BIRDDOG_ROOT="/opt/birddog"
 
-for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar iw wireless-tools python3-rpi.gpio; do
+for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar iw wireless-tools python3-rpi.gpio iptables; do
     if ! dpkg -s "$pkg" >/dev/null 2>&1; then
         PRECHECK_PASS=0
         PRECHECK_NOTES+=("package missing: $pkg")
@@ -126,7 +126,7 @@ if [[ "$BIRDDOG_MODE" == "full" ]]; then
         fi
     }
 
-    for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar iw wireless-tools python3-rpi.gpio; do
+    for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar iw wireless-tools python3-rpi.gpio iptables; do
         install_pkg "$pkg"
     done
 
