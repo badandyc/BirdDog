@@ -1375,9 +1375,10 @@ network={
 }
 EOF
 
-# Clean up any leftover wpa_supplicant state from previous attempts
-pkill -f "wpa_supplicant.*wlan0" 2>/dev/null || true
-rm -f /var/run/wpa_supplicant/wlan0 /tmp/birddog_elrs_wpa.pid 2>/dev/null || true
+# Clean up any leftover BirdDog wpa_supplicant state from previous attempts
+pkill -f "wpa_supplicant.*birddog_elrs" 2>/dev/null || true
+rm -f /tmp/birddog_elrs_wpa.pid /tmp/birddog_wpa_ctrl/wlan0 2>/dev/null || true
+mkdir -p /tmp/birddog_wpa_ctrl
 sleep 1
 
 # Cycle interface to clear driver state
@@ -1387,7 +1388,8 @@ ip link set wlan0 up 2>/dev/null || true
 sleep 1
 
 echo "  Connecting to $ELRS_SSID ..."
-wpa_supplicant -B -i wlan0 -c "$WPA_CONF" -P /tmp/birddog_elrs_wpa.pid 2>/dev/null || true
+# Use separate ctrl interface dir to avoid conflict with system wpa_supplicant service
+wpa_supplicant -B -i wlan0 -c "$WPA_CONF" -P /tmp/birddog_elrs_wpa.pid -C /tmp/birddog_wpa_ctrl 2>/dev/null || true
 
 # DHCP with 8 second timeout — fail fast
 dhclient -1 -timeout 8 -pf /tmp/birddog_elrs_dhcp.pid wlan0 2>/dev/null || true
