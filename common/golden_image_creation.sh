@@ -1598,22 +1598,22 @@ case "$1" in
             exit 1
         fi
         MAVLINK_CONF="/opt/birddog/bdm/mavlink.conf"
-        if [[ -f "$MAVLINK_CONF" ]]; then
+        WLAN0_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP "(?<=inet )[^/]+" | head -1)
+        WLAN0_ASSOC=$(iw dev wlan0 link 2>/dev/null | grep -c "Connected" || echo 0)
+        MAVPROXY_RUNNING=$(pgrep -f "mavproxy" >/dev/null 2>&1 && echo 1 || echo 0)
+        if [[ -f "$MAVLINK_CONF" && -n "$WLAN0_IP" && "$WLAN0_ASSOC" -gt 0 && "$MAVPROXY_RUNNING" -eq 1 ]]; then
             source "$MAVLINK_CONF"
-            WLAN0_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP "(?<=inet )[^/]+" | head -1)
-            if [[ -n "$WLAN0_IP" && "$MAVLINK_ACTIVE" == "1" ]]; then
-                echo ""
-                echo "================================="
-                echo "MAVLink Bridge — ACTIVE"
-                echo "================================="
-                echo "  SSID   : $ELRS_SSID"
-                echo "  wlan0  : $WLAN0_IP (ELRS backpack)"
-                echo "  wlan2  : 10.10.10.1 (BirdDog AP)"
-                echo "  Ports  : UDP 14550 (telemetry) / 14555 (commands)"
-                echo "================================="
-                echo ""
-                exit 0
-            fi
+            echo ""
+            echo "================================="
+            echo "MAVLink Bridge — ACTIVE"
+            echo "================================="
+            echo "  SSID     : $ELRS_SSID"
+            echo "  wlan0    : $WLAN0_IP (ELRS backpack)"
+            echo "  wlan2    : 10.10.10.1 (BirdDog AP)"
+            echo "  MAVProxy : running"
+            echo "================================="
+            echo ""
+            exit 0
         fi
         exec sudo bash /usr/local/bin/birddog-mavlink-bridge.sh
         ;;
