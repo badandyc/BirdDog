@@ -1666,6 +1666,15 @@ case "$1" in
                     echo "  Streams  : 0 live"
                 fi
             fi
+            MAVLINK_CONF="/opt/birddog/bdm/mavlink.conf"
+            MAVPROXY_RUNNING=$(pgrep -f "mavproxy" >/dev/null 2>&1 && echo 1 || echo 0)
+            WLAN0_ASSOC=$(iw dev wlan0 link 2>/dev/null | grep -c "Connected" || echo 0)
+            if [[ -f "$MAVLINK_CONF" && "$MAVPROXY_RUNNING" -eq 1 && "$WLAN0_ASSOC" -gt 0 ]]; then
+                source "$MAVLINK_CONF"
+                echo "  MAVLink  : active ($ELRS_SSID)"
+            else
+                echo "  MAVLink  : inactive"
+            fi
             echo "  Dashboard: http://${HOST}.local"
         elif [[ "$ROLE" == "BDC" ]]; then
             STREAM_SVC=$(systemctl is-active birddog-stream 2>/dev/null)
