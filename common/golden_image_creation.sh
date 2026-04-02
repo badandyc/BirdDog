@@ -1646,7 +1646,7 @@ case "$1" in
         echo "================================="
         echo "  Role     : $ROLE"
         MESH_SVC=$(systemctl is-active birddog-mesh 2>/dev/null)
-        PEERS=$(iw dev wlan1 station dump 2>/dev/null | grep -c "^Station" || echo 0)
+        PEERS=$(iw dev wlan1 station dump 2>/dev/null | grep -c "^Station" | tr -d '[:space:]' || echo 0)
         MESH_IP=$(ip -4 addr show wlan1 2>/dev/null | grep -oP "(?<=inet )[^/]+" | head -1)
         if [[ "$MESH_SVC" == "active" ]]; then
             echo "  Mesh     : joined (${PEERS} peers) — ${MESH_IP:-no IP}"
@@ -1715,11 +1715,11 @@ case "$1" in
             echo "  wlan2    : 10.10.10.1 (BirdDog AP)"
             echo "  MAVProxy : running"
             echo "  Log      : /opt/birddog/logs/mavlink.log"
+            echo "================================="
         else
             echo "MAVLink Bridge — INACTIVE"
             echo "================================="
         fi
-        echo "================================="
         echo ""
 
         if [[ "$BRIDGE_ACTIVE" -eq 1 ]]; then
