@@ -1692,21 +1692,66 @@ case "$1" in
         WLAN0_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP "(?<=inet )[^/]+" | head -1)
         WLAN0_ASSOC=$(iw dev wlan0 link 2>/dev/null | grep -c "Connected" || echo 0)
         MAVPROXY_RUNNING=$(pgrep -f "mavproxy" >/dev/null 2>&1 && echo 1 || echo 0)
-        if [[ -f "$MAVLINK_CONF" && -n "$WLAN0_IP" && "$WLAN0_ASSOC" -gt 0 && "$MAVPROXY_RUNNING" -eq 1 ]]; then
+        BRIDGE_ACTIVE=0
+        [[ -f "$MAVLINK_CONF" && -n "$WLAN0_IP" && "$WLAN0_ASSOC" -gt 0 && "$MAVPROXY_RUNNING" -eq 1 ]] && BRIDGE_ACTIVE=1
+
+        echo ""
+        echo "================================="
+        if [[ "$BRIDGE_ACTIVE" -eq 1 ]]; then
             source "$MAVLINK_CONF"
-            echo ""
-            echo "================================="
             echo "MAVLink Bridge — ACTIVE"
             echo "================================="
             echo "  SSID     : $ELRS_SSID"
             echo "  wlan0    : $WLAN0_IP (ELRS backpack)"
             echo "  wlan2    : 10.10.10.1 (BirdDog AP)"
             echo "  MAVProxy : running"
+            echo "  Log      : /opt/birddog/logs/mavlink.log"
+        else
+            echo "MAVLink Bridge — INACTIVE"
             echo "================================="
-            echo ""
-            exit 0
         fi
-        exec sudo bash /usr/local/bin/birddog-mavlink-bridge.sh
+        echo "================================="
+        echo ""
+
+        if [[ "$BRIDGE_ACTIVE" -eq 1 ]]; then
+            echo "  [S]top   — stop bridge and restore wlan0"
+            echo "  [X]      — exit"
+            echo ""
+            while true; do
+                read -r -p "  Choice: " MAV_INPUT
+                case "$MAV_INPUT" in
+                    S)
+                        echo ""
+                        echo "  Stopping MAVLink bridge..."
+                        sudo pkill -f "mavproxy" 2>/dev/null || true
+                        sleep 1
+                        WLAN0_RFKILL_IDX=$(cat /sys/class/net/wlan0/phy80211/rfkill*/index 2>/dev/null)
+                        [[ -n "$WLAN0_RFKILL_IDX" ]] && sudo rfkill block "$WLAN0_RFKILL_IDX" 2>/dev/null || true
+                        sudo ip link set wlan0 down 2>/dev/null || true
+                        sudo ip route del default dev wlan0 2>/dev/null || true
+                        echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf >/dev/null
+                        sudo rm -f "$MAVLINK_CONF" 2>/dev/null || true
+                        echo "  Bridge stopped — wlan0 blocked — DNS restored"
+                        echo ""
+                        break
+                        ;;
+                    X) break ;;
+                    *) echo "  Invalid — enter S or X" ;;
+                esac
+            done
+        else
+            echo "  [C]onfigure — start MAVLink bridge"
+            echo "  [X]         — exit"
+            echo ""
+            while true; do
+                read -r -p "  Choice: " MAV_INPUT
+                case "$MAV_INPUT" in
+                    C) exec sudo bash /usr/local/bin/birddog-mavlink-bridge.sh ;;
+                    X) break ;;
+                    *) echo "  Invalid — enter C or X" ;;
+                esac
+            done
+        fi
         ;;
     web)
         HOST=$(hostname)
