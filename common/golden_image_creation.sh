@@ -1541,7 +1541,7 @@ echo ""
 # binds to a live interface. Runs from /tmp for log write permission.
 MAVLINK_LOG="/opt/birddog/logs/mavlink.log"
 mkdir -p /opt/birddog/logs
-echo "--- MAVLink Bridge started $(date) ---" >> "$MAVLINK_LOG"
+echo "--- MAVLink Bridge started $(date) ---" > "$MAVLINK_LOG"
 cd /tmp && /usr/local/bin/mavproxy.py --master=udpin:0.0.0.0:14550 \
     --out=udpout:10.10.10.105:14550 \
     --non-interactive \
