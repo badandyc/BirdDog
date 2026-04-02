@@ -1331,20 +1331,69 @@ echo "  The ELRS TX backpack broadcasts MAVLink telemetry over WiFi."
 echo "  This bridges wlan0 to the BirdDog AP so Mission Planner"
 echo "  on the AP network receives drone telemetry on UDP 14550."
 echo ""
-echo "  [UID]  — enter 6-digit code from backpack"
-echo "  [SSID] — enter full network name manually"
-echo "  [X]    — cancel"
-echo ""
+
+# Unblock brcmfmac (wlan0) up front so we can scan for the backpack SSID.
+# Will be re-blocked on [X] exit.
+for rf in /sys/class/rfkill/rfkill*/; do
+    drv=$(readlink -f "$rf/device/driver" 2>/dev/null | xargs basename 2>/dev/null)
+    if [[ "$drv" == "brcmfmac" ]]; then
+        idx=$(cat "$rf/index" 2>/dev/null)
+        rfkill unblock "$idx" 2>/dev/null || true
+    fi
+done
+sleep 1
+ip link set wlan0 up 2>/dev/null || true
+sleep 1
+
+block_wlan0() {
+    for rf in /sys/class/rfkill/rfkill*/; do
+        drv=$(readlink -f "$rf/device/driver" 2>/dev/null | xargs basename 2>/dev/null)
+        if [[ "$drv" == "brcmfmac" ]]; then
+            idx=$(cat "$rf/index" 2>/dev/null)
+            rfkill block "$idx" 2>/dev/null || true
+        fi
+    done
+    ip link set wlan0 down 2>/dev/null || true
+}
+
+# Scan for ELRS backpack SSID
+echo "  Scanning for ELRS backpack..."
+DETECTED_SSID=$(iw dev wlan0 scan 2>/dev/null \
+    | grep -oP "(?<=SSID: )${ELRS_SSID_BASE} [0-9a-fA-F]{6}" \
+    | head -1)
+
+if [[ -n "$DETECTED_SSID" ]]; then
+    echo "  Found : $DETECTED_SSID"
+    echo ""
+    echo "  [Y]    — connect to $DETECTED_SSID"
+    echo "  [UID]  — enter a different 6-digit UID"
+    echo "  [SSID] — enter full network name manually"
+    echo "  [X]    — cancel"
+    echo ""
+    VALID_CHOICES="Y|UID|SSID|X"
+else
+    echo "  No ELRS backpack detected"
+    echo ""
+    echo "  [UID]  — enter 6-digit code from backpack"
+    echo "  [SSID] — enter full network name manually"
+    echo "  [X]    — cancel"
+    echo ""
+    VALID_CHOICES="UID|SSID|X"
+fi
 
 while true; do
     read -r -p "  Choice: " MODE_INPUT
-    [[ "$MODE_INPUT" == "UID" || "$MODE_INPUT" == "SSID" || "$MODE_INPUT" == "X" ]] && break
-    echo "  Invalid — enter UID, SSID, or X"
+    [[ "$MODE_INPUT" =~ ^(${VALID_CHOICES})$ ]] && break
+    echo "  Invalid — enter one of: ${VALID_CHOICES//|/ }"
 done
 
 if [[ "$MODE_INPUT" == "X" ]]; then
     echo "  Cancelled."
+    block_wlan0
     exit 0
+elif [[ "$MODE_INPUT" == "Y" ]]; then
+    ELRS_SSID="$DETECTED_SSID"
+    echo "  SSID : $ELRS_SSID"
 elif [[ "$MODE_INPUT" == "UID" ]]; then
     while true; do
         read -r -p "  Enter 6-digit UID: " MAVLINK_INPUT
@@ -1358,18 +1407,6 @@ else
     ELRS_SSID="$MAVLINK_INPUT"
     echo "  SSID : $ELRS_SSID"
 fi
-
-# Unblock only wlan0 (brcmfmac) by driver name for MAVLink bridge use.
-# This is a deliberate, operator-initiated action — wlan0 is normally
-# kept blocked to prevent the onboard radio from interfering with mesh.
-for rf in /sys/class/rfkill/rfkill*/; do
-    drv=$(readlink -f "$rf/device/driver" 2>/dev/null | xargs basename 2>/dev/null)
-    if [[ "$drv" == "brcmfmac" ]]; then
-        idx=$(cat "$rf/index" 2>/dev/null)
-        rfkill unblock "$idx" && echo "  unblocked rfkill$idx (brcmfmac/wlan0)" || true
-    fi
-done
-sleep 1
 
 # Write wpa_supplicant config
 WPA_CONF="/tmp/birddog_elrs_wpa.conf"
