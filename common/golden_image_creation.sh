@@ -1343,7 +1343,7 @@ for rf in /sys/class/rfkill/rfkill*/; do
 done
 sleep 1
 ip link set wlan0 up 2>/dev/null || true
-sleep 1
+sleep 5
 
 block_wlan0() {
     for rf in /sys/class/rfkill/rfkill*/; do
@@ -1356,35 +1356,49 @@ block_wlan0() {
     ip link set wlan0 down 2>/dev/null || true
 }
 
-# Scan for ELRS backpack SSID
-echo "  Scanning for ELRS backpack..."
-DETECTED_SSID=$(iw dev wlan0 scan 2>/dev/null \
-    | grep -oP "(?<=SSID: )${ELRS_SSID_BASE} [0-9a-fA-F]{6}" \
-    | head -1)
+do_scan() {
+    echo "  Scanning for ELRS backpack..."
+    DETECTED_SSID=$(iw dev wlan0 scan 2>/dev/null \
+        | grep -oP "(?<=SSID: )${ELRS_SSID_BASE} [0-9a-fA-F]{6}" \
+        | head -1)
+}
 
-if [[ -n "$DETECTED_SSID" ]]; then
-    echo "  Found : $DETECTED_SSID"
-    echo ""
-    echo "  [Y]    — connect to $DETECTED_SSID"
-    echo "  [UID]  — enter a different 6-digit UID"
-    echo "  [SSID] — enter full network name manually"
-    echo "  [X]    — cancel"
-    echo ""
-    VALID_CHOICES="Y|UID|SSID|X"
-else
-    echo "  No ELRS backpack detected"
-    echo ""
-    echo "  [UID]  — enter 6-digit code from backpack"
-    echo "  [SSID] — enter full network name manually"
-    echo "  [X]    — cancel"
-    echo ""
-    VALID_CHOICES="UID|SSID|X"
-fi
+do_scan
 
 while true; do
+    if [[ -n "$DETECTED_SSID" ]]; then
+        echo "  Found : $DETECTED_SSID"
+        echo ""
+        echo "  [Y]    — connect to $DETECTED_SSID"
+        echo "  [R]    — rescan"
+        echo "  [UID]  — enter a different 6-digit UID"
+        echo "  [SSID] — enter full network name manually"
+        echo "  [X]    — cancel"
+        echo ""
+        VALID_CHOICES="Y|R|UID|SSID|X"
+    else
+        echo "  No ELRS backpack detected"
+        echo ""
+        echo "  [R]    — rescan"
+        echo "  [UID]  — enter 6-digit code from backpack"
+        echo "  [SSID] — enter full network name manually"
+        echo "  [X]    — cancel"
+        echo ""
+        VALID_CHOICES="R|UID|SSID|X"
+    fi
+
     read -r -p "  Choice: " MODE_INPUT
-    [[ "$MODE_INPUT" =~ ^(${VALID_CHOICES})$ ]] && break
-    echo "  Invalid — enter one of: ${VALID_CHOICES//|/ }"
+    if [[ ! "$MODE_INPUT" =~ ^(${VALID_CHOICES})$ ]]; then
+        echo "  Invalid — enter one of: ${VALID_CHOICES//|/ }"
+        continue
+    fi
+
+    if [[ "$MODE_INPUT" == "R" ]]; then
+        do_scan
+        continue
+    fi
+
+    break
 done
 
 if [[ "$MODE_INPUT" == "X" ]]; then
