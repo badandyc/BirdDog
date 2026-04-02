@@ -1756,14 +1756,10 @@ fi
 
 if [[ "$BIRDDOG_MODE" == "full" ]]; then
     echo "====================================="
-    echo "⚠  REBOOT REQUIRED"
+    echo "Rebooting in 3 seconds..."
     echo "====================================="
-    echo ""
-    echo "  Udev rules and system services were installed."
-    echo "  Reboot before running birddog configure."
-    echo ""
-    echo "    sudo reboot"
-    echo ""
+    sleep 3
+    reboot
 else
     echo "Next step: birddog configure"
 fi
