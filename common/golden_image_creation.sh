@@ -1365,8 +1365,16 @@ else
     echo "  SSID : $ELRS_SSID"
 fi
 
-# Unblock wlan0
-rfkill unblock wifi 2>/dev/null || true
+# Unblock only wlan0 (brcmfmac) by driver name for MAVLink bridge use.
+# This is a deliberate, operator-initiated action — wlan0 is normally
+# kept blocked to prevent the onboard radio from interfering with mesh.
+for rf in /sys/class/rfkill/rfkill*/; do
+    drv=$(readlink -f "$rf/device/driver" 2>/dev/null | xargs basename 2>/dev/null)
+    if [[ "$drv" == "brcmfmac" ]]; then
+        idx=$(cat "$rf/index" 2>/dev/null)
+        rfkill unblock "$idx" && echo "  unblocked rfkill$idx (brcmfmac/wlan0)" || true
+    fi
+done
 sleep 1
 
 # Write wpa_supplicant config
