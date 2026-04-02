@@ -1332,27 +1332,21 @@ echo "  This bridges wlan0 to the BirdDog AP so Mission Planner"
 echo "  on the AP network receives drone telemetry on UDP 14550."
 echo ""
 
-# Unblock brcmfmac (wlan0) up front so we can scan for the backpack SSID.
+# Unblock wlan0 by looking up its rfkill index directly from the interface.
+# This is more reliable than driver name matching via sysfs symlinks.
 # Will be re-blocked on [X] exit.
-for rf in /sys/class/rfkill/rfkill*/; do
-    drv=$(readlink -f "$rf/device/driver" 2>/dev/null | xargs basename 2>/dev/null)
-    if [[ "$drv" == "brcmfmac" ]]; then
-        idx=$(cat "$rf/index" 2>/dev/null)
-        rfkill unblock "$idx" 2>/dev/null || true
-    fi
-done
+WLAN0_RFKILL_IDX=$(cat /sys/class/net/wlan0/phy80211/rfkill*/index 2>/dev/null)
+if [[ -n "$WLAN0_RFKILL_IDX" ]]; then
+    rfkill unblock "$WLAN0_RFKILL_IDX" 2>/dev/null || true
+fi
 sleep 1
-ip link set wlan0 up 2>/dev/null || true
+sudo ip link set wlan0 up 2>/dev/null || true
 sleep 5
 
 block_wlan0() {
-    for rf in /sys/class/rfkill/rfkill*/; do
-        drv=$(readlink -f "$rf/device/driver" 2>/dev/null | xargs basename 2>/dev/null)
-        if [[ "$drv" == "brcmfmac" ]]; then
-            idx=$(cat "$rf/index" 2>/dev/null)
-            rfkill block "$idx" 2>/dev/null || true
-        fi
-    done
+    if [[ -n "$WLAN0_RFKILL_IDX" ]]; then
+        rfkill block "$WLAN0_RFKILL_IDX" 2>/dev/null || true
+    fi
     ip link set wlan0 down 2>/dev/null || true
 }
 
