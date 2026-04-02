@@ -514,24 +514,10 @@ echo "====================================="
 echo "Rebooting in 3 seconds..."
 echo "====================================="
 
-# Temporary beep notification — will be replaced with IPC trigger in v1.75
-python3 - <<'PYBEEP'
-import RPi.GPIO as GPIO
-import time
-PIN_BUZZER = 24
-GPIO.setmode(GPIO.BCM)
-GPIO.setwarnings(False)
-GPIO.setup(PIN_BUZZER, GPIO.OUT)
-def beep(pattern):
-    for on_t, off_t in pattern:
-        GPIO.output(PIN_BUZZER, GPIO.HIGH)
-        time.sleep(on_t)
-        GPIO.output(PIN_BUZZER, GPIO.LOW)
-        if off_t > 0:
-            time.sleep(off_t)
-beep([(0.1, 0.15), (0.1, 0.3), (0.8, 0)])
-GPIO.cleanup()
-PYBEEP
+# Signal birddog_day to play the role beep via IPC
+mkdir -p /run/birddog
+touch /run/birddog/cmd.beep_role
+sleep 1
 
 sleep 3
 reboot
