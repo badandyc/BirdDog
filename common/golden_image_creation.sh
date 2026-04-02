@@ -26,7 +26,7 @@ PRECHECK_NOTES=()
 
 BIRDDOG_ROOT="/opt/birddog"
 
-for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar iw wireless-tools python3-rpi.gpio iptables; do
+for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar iw wireless-tools python3-rpi.gpio python3-pip; do
     if ! dpkg -s "$pkg" >/dev/null 2>&1; then
         PRECHECK_PASS=0
         PRECHECK_NOTES+=("package missing: $pkg")
@@ -126,9 +126,16 @@ if [[ "$BIRDDOG_MODE" == "full" ]]; then
         fi
     }
 
-    for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar iw wireless-tools python3-rpi.gpio iptables; do
+    for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar iw wireless-tools python3-rpi.gpio python3-pip; do
         install_pkg "$pkg"
     done
+
+    # --------------------------------------------------
+    echo "[Phase 1.4] Installing MAVProxy"
+    # --------------------------------------------------
+
+    pip3 install MAVProxy future --break-system-packages --quiet 2>/dev/null || true
+    echo "  MAVProxy installed"
 
     # --------------------------------------------------
     echo "[Phase 1.5] Installing MediaMTX"
@@ -1401,6 +1408,8 @@ killall dhcpcd 2>/dev/null || true
 sleep 1
 dhcpcd wlan0 2>/dev/null || true
 sleep 5
+# Kill dhcpcd immediately after lease — prevents it renewing and corrupting DNS/routing
+killall dhcpcd 2>/dev/null || true
 
 WLAN0_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet )[^/]+' | head -1)
 
