@@ -195,7 +195,7 @@ Type=oneshot
 # Block onboard wifi by driver name — index-based blocking is unreliable
 # across reboots and hardware configurations.
 # brcmfmac is the onboard Pi WiFi driver.
-ExecStart=/bin/bash -c '    for phy in /sys/class/ieee80211/*/; do         driver=$(basename $(readlink $phy/device/driver 2>/dev/null) 2>/dev/null);         name=$(cat $phy/name 2>/dev/null);         if [[ "$driver" == "brcmfmac" ]]; then             rfkill block "$name" 2>/dev/null || true;         fi;     done'
+ExecStart=/bin/bash -c '    for rf in /sys/class/rfkill/rfkill*/; do         driver=$(basename $(readlink $rf/device/device/driver 2>/dev/null) 2>/dev/null);         idx=$(cat $rf/index 2>/dev/null);         if [[ "$driver" == "brcmfmac" && -n "$idx" ]]; then             rfkill block "$idx" 2>/dev/null || true;         fi;     done'
 RemainAfterExit=yes
 
 [Install]
@@ -1422,20 +1422,11 @@ fi
 
 echo "  Connected — wlan0 IP: $WLAN0_IP"
 
-# Remove default route via wlan0 — forward only, never use as internet gateway
+# Remove default route via wlan0 — never use as internet gateway
 ip route del default dev wlan0 2>/dev/null || true
 
-# Restore DNS — backpack DHCP pushes its own DNS which breaks internet access
+# Restore DNS — backpack DHCP pushes its own DNS
 echo "nameserver 8.8.8.8" > /etc/resolv.conf
-
-# Enable IP forwarding
-echo 1 > /proc/sys/net/ipv4/ip_forward
-
-# Forward MAVLink UDP ports between wlan0 and wlan2
-iptables -A FORWARD -i wlan0 -o wlan2 -p udp --dport 14550 -j ACCEPT
-iptables -A FORWARD -i wlan2 -o wlan0 -p udp --dport 14555 -j ACCEPT
-iptables -t nat -A POSTROUTING -o wlan0 -j MASQUERADE
-iptables -t nat -A POSTROUTING -o wlan2 -j MASQUERADE
 
 # Save state for status check
 mkdir -p /opt/birddog/bdm
@@ -1451,10 +1442,30 @@ echo "MAVLink Bridge Active"
 echo "================================="
 echo "  wlan0  : $WLAN0_IP (ELRS backpack)"
 echo "  wlan2  : 10.10.10.1 (BirdDog AP)"
-echo "  Ports  : UDP 14550 (telemetry) / 14555 (commands)"
-echo "  Connect Mission Planner to BirdDog AP → UDP 14550"
+echo "  Action : Connect Mission Planner to BirdDog AP → UDP 14550"
+echo "  Note   : MAVProxy starts in 5 seconds — ensure MP is listening first"
 echo "================================="
 echo ""
+
+sleep 5
+
+# MAVProxy — listens on wlan0 for backpack telemetry,
+# broadcasts to all devices on BirdDog AP subnet.
+# udpbcast locks onto the first client that responds — connect MP promptly.
+# Runs from /tmp for log write permission.
+cd /tmp && mavproxy.py --master=udpin:0.0.0.0:14550 \
+    --out=udpbcast:10.10.10.255:14550 \
+    --non-interactive \
+    --default-modules="" 2>/dev/null &
+
+sleep 3
+
+if pgrep -f "mavproxy" >/dev/null; then
+    echo "  MAVProxy running — telemetry broadcasting to BirdDog AP"
+else
+    echo "  WARNING: MAVProxy failed to start"
+    echo "  Try manually: cd /tmp && sudo mavproxy.py --master=udpin:0.0.0.0:14550 --out=udpbcast:10.10.10.255:14550 --non-interactive --default-modules=\"\""
+fi
 MAVLINK_BRIDGE
 
 chmod +x /usr/local/bin/birddog-mavlink-bridge.sh
