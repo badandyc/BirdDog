@@ -1406,14 +1406,14 @@ echo "  Connecting to $ELRS_SSID ..."
 wpa_supplicant -B -i wlan0 -c "$WPA_CONF" -P /tmp/birddog_elrs_wpa.pid -C /tmp/birddog_wpa_ctrl 2>/dev/null || true
 
 # Request DHCP — kill any existing dhcpcd first for clean start
+# -t 30 gives the backpack's DHCP server enough time to respond
 killall dhcpcd 2>/dev/null || true
 sleep 1
-dhcpcd wlan0 2>/dev/null || true
-sleep 5
+dhcpcd wlan0 -t 30 2>/dev/null || true
 # Kill dhcpcd immediately after lease — prevents it renewing and corrupting DNS/routing
 killall dhcpcd 2>/dev/null || true
 
-WLAN0_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet )[^/]+' | head -1)
+WLAN0_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet )[^/]+' | grep -v '^169\.254\.' | head -1)
 
 if [[ -z "$WLAN0_IP" ]]; then
     echo ""
@@ -1445,16 +1445,14 @@ echo "================================="
 echo "  wlan0  : $WLAN0_IP (ELRS backpack)"
 echo "  wlan2  : 10.10.10.1 (BirdDog AP)"
 echo "  Action : Connect Mission Planner to BirdDog AP → UDP 14550"
-echo "  Note   : MAVProxy starts in 5 seconds — ensure MP is listening first"
+echo "  Note   : MAVProxy starting now — ensure MP is listening"
 echo "================================="
 echo ""
 
-sleep 5
-
 # MAVProxy — listens on wlan0 for backpack telemetry,
 # broadcasts to all devices on BirdDog AP subnet.
-# udpbcast locks onto the first client that responds — connect MP promptly.
-# Runs from /tmp for log write permission.
+# Started only after wlan0 has a confirmed real IP so the socket
+# binds to a live interface. Runs from /tmp for log write permission.
 cd /tmp && mavproxy.py --master=udpin:0.0.0.0:14550 \
     --out=udpbcast:10.10.10.255:14550 \
     --non-interactive \
