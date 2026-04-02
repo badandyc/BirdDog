@@ -1539,18 +1539,23 @@ echo ""
 # broadcasts to all devices on BirdDog AP subnet.
 # Started only after wlan0 has a confirmed real IP so the socket
 # binds to a live interface. Runs from /tmp for log write permission.
+MAVLINK_LOG="/opt/birddog/logs/mavlink.log"
+mkdir -p /opt/birddog/logs
+echo "--- MAVLink Bridge started $(date) ---" >> "$MAVLINK_LOG"
 cd /tmp && /usr/local/bin/mavproxy.py --master=udpin:0.0.0.0:14550 \
     --out=udpout:10.10.10.105:14550 \
     --non-interactive \
-    --default-modules="" &
+    --default-modules="" </dev/null >> "$MAVLINK_LOG" 2>&1 &
 
 sleep 3
 
 if pgrep -f "mavproxy" >/dev/null; then
     echo "  MAVProxy running — telemetry broadcasting to BirdDog AP"
+    echo "  Log : $MAVLINK_LOG"
 else
     echo "  WARNING: MAVProxy failed to start"
-    echo "  Try manually: cd /tmp && sudo mavproxy.py --master=udpin:0.0.0.0:14550 --out=udpbcast:10.10.10.255:14550 --non-interactive --default-modules=\"\""
+    echo "  Check log: $MAVLINK_LOG"
+    echo "  Try manually: cd /tmp && sudo mavproxy.py --master=udpin:0.0.0.0:14550 --out=udpout:10.10.10.105:14550 --non-interactive --default-modules=\"\""
 fi
 MAVLINK_BRIDGE
 
