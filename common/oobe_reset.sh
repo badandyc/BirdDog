@@ -65,7 +65,6 @@ remove_path() {
 
 # -------------------------------------------------------
 # Step 1 — Stop and disable BirdDog services
-# Disable BEFORE removing unit files so symlinks are cleaned
 # -------------------------------------------------------
 
 step "Stopping BirdDog services"
@@ -77,8 +76,6 @@ svc_stop_disable hostapd.service
 svc_stop_disable dnsmasq.service
 svc_stop_disable nginx.service
 
-# Re-mask hostapd — Pi OS ships it masked, configure unmasks it.
-# oobe restores the masked state so it can't accidentally start.
 systemctl mask hostapd 2>/dev/null && echo "  masked   hostapd.service" || true
 
 # -------------------------------------------------------
@@ -90,7 +87,6 @@ step "Removing runtime scripts"
 remove_path /usr/local/bin/birddog-mesh-join.sh
 remove_path /usr/local/bin/birddog-stream.sh
 
-# Remove unit files and any lingering wants symlinks
 for SVC in birddog-mesh birddog-stream mediamtx; do
     rm -f "/etc/systemd/system/${SVC}.service"
     rm -f "/etc/systemd/system/multi-user.target.wants/${SVC}.service"
@@ -98,7 +94,6 @@ done
 
 # -------------------------------------------------------
 # Step 3 — Clear runtime state
-# Preserve: scripts, mediamtx binary, version info, birddog CLI
 # -------------------------------------------------------
 
 step "Clearing runtime state"
@@ -107,7 +102,6 @@ remove_path "$BIRDDOG_ROOT/logs"
 remove_path "$BIRDDOG_ROOT/web"
 remove_path "$BIRDDOG_ROOT/bdc/bdc.conf"
 
-# Clear mesh runtime logs but preserve the installer script
 if [[ -d "$BIRDDOG_ROOT/mesh" ]]; then
     find "$BIRDDOG_ROOT/mesh" -mindepth 1 \
         ! -name "add_mesh_network.sh" \
@@ -115,7 +109,6 @@ if [[ -d "$BIRDDOG_ROOT/mesh" ]]; then
     echo "  mesh runtime cleared (installer preserved)"
 fi
 
-# Recreate empty dirs
 mkdir -p "$BIRDDOG_ROOT"/{logs,web,mesh}
 
 # -------------------------------------------------------
@@ -124,25 +117,16 @@ mkdir -p "$BIRDDOG_ROOT"/{logs,web,mesh}
 
 step "Clearing role configuration"
 
-# hostapd config (preserve package dir itself)
 if [[ -d /etc/hostapd ]]; then
     rm -f /etc/hostapd/*.conf 2>/dev/null || true
     echo "  hostapd config cleared"
 fi
 
-# hostapd systemd drop-in
 remove_path /etc/systemd/system/hostapd.service.d
-
-# dnsmasq config
 remove_path /etc/dnsmasq.conf
-
-# networkd config (written by AP setup)
 remove_path /etc/systemd/network
 
 # Restore eth0 DHCP so management access survives reboot
-# We commit to systemd-networkd as the network manager for all nodes —
-# ensure it is enabled and NetworkManager is disabled so the
-# restored config is actually picked up on reboot.
 mkdir -p /etc/systemd/network
 cat > /etc/systemd/network/10-eth0.network << 'EOF'
 [Match]
@@ -157,13 +141,15 @@ SendHostname=yes
 EOF
 echo "  eth0 DHCP config restored"
 
-# Ensure systemd-networkd is enabled and will manage eth0 on reboot
-systemctl enable systemd-networkd 2>/dev/null || true
+# Ensure systemd-networkd manages eth0 — stop NetworkManager so it
+# can't grab eth0 before networkd does
+systemctl stop NetworkManager 2>/dev/null || true
 systemctl disable NetworkManager 2>/dev/null || true
-echo "  systemd-networkd enabled — NetworkManager disabled"
-
-# Reconfigure eth0 immediately so current session stays connected
+systemctl enable systemd-networkd 2>/dev/null || true
+systemctl restart systemd-networkd 2>/dev/null || true
+sleep 2
 networkctl reconfigure eth0 2>/dev/null || true
+echo "  systemd-networkd enabled — NetworkManager disabled"
 echo "  eth0 reconfigured"
 
 # -------------------------------------------------------
@@ -188,7 +174,7 @@ EOF
 echo "  $OLD_HOST → birddog"
 
 # -------------------------------------------------------
-# Step 6 — Restart avahi with clean state
+# Step 6 — Restart avahi
 # -------------------------------------------------------
 
 step "Restarting avahi"
