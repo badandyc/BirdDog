@@ -195,7 +195,7 @@ Type=oneshot
 # Block onboard wifi by driver name — index-based blocking is unreliable
 # across reboots and hardware configurations.
 # brcmfmac is the onboard Pi WiFi driver.
-ExecStart=/bin/bash -c '    for rf in /sys/class/rfkill/rfkill*/; do         driver=$(basename $(readlink $rf/device/device/driver 2>/dev/null) 2>/dev/null);         idx=$(cat $rf/index 2>/dev/null);         if [[ "$driver" == "brcmfmac" && -n "$idx" ]]; then             rfkill block "$idx" 2>/dev/null || true;         fi;     done'
+ExecStart=/bin/bash -c '    sleep 3;     for rf in /sys/class/rfkill/rfkill*/; do         subsystem=$(basename $(readlink $rf/device/device/subsystem 2>/dev/null) 2>/dev/null);         idx=$(cat $rf/index 2>/dev/null);         if [[ "$subsystem" == "sdio" && -n "$idx" ]]; then             rfkill block "$idx" 2>/dev/null || true;         fi;     done'
 RemainAfterExit=yes
 
 [Install]
