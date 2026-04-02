@@ -754,11 +754,8 @@ def boot_beep():
 def shutdown_beep():
     beep([(1.0, 0)])
 
-def role_beep_bdc():
+def role_beep():
     beep([(0.8, 0)])
-
-def role_beep_bdm():
-    beep([(0.8, 0.3), (0.8, 0)])
 
 def sos_beep():
     dot = 0.1
@@ -1027,10 +1024,7 @@ def boot_sequence():
     else:
         boot_beep()
         time.sleep(0.3)
-        if role_sw == "bdc":
-            role_beep_bdc()
-        else:
-            role_beep_bdm()
+        role_beep()
 
 def main():
     global last_state_check
