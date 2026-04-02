@@ -109,6 +109,21 @@ mkdir -p "$BIRDDOG_ROOT"/{bdm,bdc,mesh,common,mediamtx,web,logs,version}
 
 if [[ "$BIRDDOG_MODE" == "full" ]]; then
 
+    # Tear down any active MAVLink bridge session before install.
+    # Kills mavproxy, blocks wlan0, and removes state file.
+    MAVLINK_CONF_PATH="/opt/birddog/bdm/mavlink.conf"
+    if pgrep -f "mavproxy" >/dev/null 2>&1; then
+        echo "  Stopping active MAVLink bridge..."
+        pkill -f "mavproxy" 2>/dev/null || true
+        sleep 1
+    fi
+    WLAN0_RFKILL_IDX=$(cat /sys/class/net/wlan0/phy80211/rfkill*/index 2>/dev/null)
+    if [[ -n "$WLAN0_RFKILL_IDX" ]]; then
+        rfkill block "$WLAN0_RFKILL_IDX" 2>/dev/null || true
+    fi
+    ip link set wlan0 down 2>/dev/null || true
+    rm -f "$MAVLINK_CONF_PATH" 2>/dev/null || true
+
     echo "[Phase 0] Updating package index"
     apt-get update
 
@@ -1331,6 +1346,23 @@ echo "  The ELRS TX backpack broadcasts MAVLink telemetry over WiFi."
 echo "  This bridges wlan0 to the BirdDog AP so Mission Planner"
 echo "  on the AP network receives drone telemetry on UDP 14550."
 echo ""
+
+teardown_mavlink() {
+    if pgrep -f "mavproxy" >/dev/null 2>&1; then
+        echo "  Stopping existing MAVProxy session..."
+        pkill -f "mavproxy" 2>/dev/null || true
+        sleep 1
+    fi
+    WLAN0_RFKILL_IDX=$(cat /sys/class/net/wlan0/phy80211/rfkill*/index 2>/dev/null)
+    if [[ -n "$WLAN0_RFKILL_IDX" ]]; then
+        rfkill block "$WLAN0_RFKILL_IDX" 2>/dev/null || true
+    fi
+    ip link set wlan0 down 2>/dev/null || true
+    rm -f "$MAVLINK_CONF" 2>/dev/null || true
+}
+
+# Clean up any previous mavlink session before starting fresh
+teardown_mavlink
 
 # Unblock wlan0 by looking up its rfkill index directly from the interface.
 # This is more reliable than driver name matching via sysfs symlinks.
