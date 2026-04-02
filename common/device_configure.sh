@@ -511,11 +511,7 @@ fi
 echo "====================================="
 echo ""
 echo "====================================="
-echo "⚠  REBOOT REQUIRED"
+echo "Rebooting in 3 seconds..."
 echo "====================================="
-echo ""
-echo "  Configuration changes do not take full effect"
-echo "  until the node is rebooted."
-echo ""
-echo "    sudo reboot"
-echo ""
+sleep 3
+reboot
