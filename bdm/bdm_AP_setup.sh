@@ -197,12 +197,22 @@ fi
 
 mkdir -p /etc/systemd/system/hostapd.service.d
 
-cat > /etc/systemd/system/hostapd.service.d/birddog.conf << EOF
+# Unblock only the rtl8192cu (AP adapter/wlan2) by driver name.
+# rfkill unblock wifi is intentionally avoided — it would unblock all
+# radios including the onboard brcmfmac which must stay blocked.
+cat > /etc/systemd/system/hostapd.service.d/birddog.conf << 'EOF'
 [Unit]
-After=systemd-networkd.service
+After=systemd-networkd.service birddog-block-onboard-wifi.service
 
 [Service]
-ExecStartPre=/usr/sbin/rfkill unblock wifi
+ExecStartPre=/bin/bash -c '\
+    for rf in /sys/class/rfkill/rfkill*/; do \
+        drv=$(readlink -f "$rf/device/driver" 2>/dev/null | xargs basename 2>/dev/null); \
+        if [[ "$drv" == "rtl8192cu" ]]; then \
+            idx=$(cat "$rf/index" 2>/dev/null); \
+            rfkill unblock "$idx" && echo "unblocked rfkill$idx (rtl8192cu)" || true; \
+        fi; \
+    done'
 EOF
 
 systemctl unmask hostapd
