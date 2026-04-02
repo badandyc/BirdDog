@@ -1507,7 +1507,7 @@ echo ""
 # broadcasts to all devices on BirdDog AP subnet.
 # Started only after wlan0 has a confirmed real IP so the socket
 # binds to a live interface. Runs from /tmp for log write permission.
-cd /tmp && mavproxy.py --master=udpin:0.0.0.0:14550 \
+cd /tmp && /usr/local/bin/mavproxy.py --master=udpin:0.0.0.0:14550 \
     --out=udpout:10.10.10.105:14550 \
     --non-interactive \
     --default-modules="" &
