@@ -1460,7 +1460,7 @@ wpa_supplicant -B -i wlan0 -c "$WPA_CONF" -P /tmp/birddog_elrs_wpa.pid -C /tmp/b
 # -t 30 gives the backpack's DHCP server enough time to respond
 killall dhcpcd 2>/dev/null || true
 sleep 1
-dhcpcd wlan0 -t 30 2>/dev/null || true
+dhcpcd wlan0 -t 30 --nohook resolv.conf 2>/dev/null || true
 # Kill dhcpcd immediately after lease — prevents it renewing and corrupting DNS/routing
 killall dhcpcd 2>/dev/null || true
 
