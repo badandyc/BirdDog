@@ -1373,18 +1373,20 @@ while true; do
         echo "  [R]    — rescan"
         echo "  [UID]  — enter a different 6-digit UID"
         echo "  [SSID] — enter full network name manually"
+        echo "  [F]    — fix DNS"
         echo "  [X]    — cancel"
         echo ""
-        VALID_CHOICES="Y|R|UID|SSID|X"
+        VALID_CHOICES="Y|R|UID|SSID|F|X"
     else
         echo "  No ELRS backpack detected"
         echo ""
         echo "  [R]    — rescan"
         echo "  [UID]  — enter 6-digit code from backpack"
         echo "  [SSID] — enter full network name manually"
+        echo "  [F]    — fix DNS"
         echo "  [X]    — cancel"
         echo ""
-        VALID_CHOICES="R|UID|SSID|X"
+        VALID_CHOICES="R|UID|SSID|F|X"
     fi
 
     read -r -p "  Choice: " MODE_INPUT
@@ -1395,6 +1397,13 @@ while true; do
 
     if [[ "$MODE_INPUT" == "R" ]]; then
         do_scan
+        continue
+    fi
+
+    if [[ "$MODE_INPUT" == "F" ]]; then
+        ip route del default dev wlan0 2>/dev/null || true
+        echo "nameserver 8.8.8.8" > /etc/resolv.conf
+        echo "  DNS restored — default route via wlan0 removed"
         continue
     fi
 
