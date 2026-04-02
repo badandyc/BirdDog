@@ -729,6 +729,12 @@ PRESS_ROLL_CALL  = 4.0    # 4s hold — LED roll call
 LONG_PRESS_TIME  = 10.0   # 10s hold — shutdown
 SOS_INTERVAL     = 30.0   # seconds between periodic SOS on mismatch
 
+# ── IPC ──
+# External processes drop command files into IPC_DIR.
+# birddog_day processes and deletes them each main loop iteration.
+# Command files are named cmd.<action> e.g. cmd.beep_role
+IPC_DIR = "/run/birddog"
+
 # ── state ──
 led_blue_blink       = 0
 led_green_blink      = 0   # 0=off 1=slow 2=fast 3=solid
@@ -1041,8 +1047,35 @@ def boot_sequence():
         time.sleep(0.3)
         role_beep()
 
+def check_ipc():
+    try:
+        if not os.path.isdir(IPC_DIR):
+            return
+        for fname in os.listdir(IPC_DIR):
+            if not fname.startswith("cmd."):
+                continue
+            fpath = os.path.join(IPC_DIR, fname)
+            action = fname[4:]  # strip "cmd."
+            try:
+                os.remove(fpath)
+            except Exception:
+                continue
+            if action == "beep_role":
+                boot_beep()
+                time.sleep(0.3)
+                role_beep()
+            elif action == "beep_boot":
+                boot_beep()
+            elif action == "beep_sos":
+                sos_beep()
+            elif action == "roll_call":
+                status_roll_call()
+    except Exception:
+        pass
+
 def main():
     global last_state_check
+    os.makedirs(IPC_DIR, exist_ok=True)
     setup()
     boot_sequence()
     check_state()
@@ -1050,6 +1083,7 @@ def main():
 
     while True:
         now = time.time()
+        check_ipc()
         check_button(now)
         update_blink(now)
         if now - last_state_check >= STATE_INTERVAL:
