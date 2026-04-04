@@ -1501,10 +1501,21 @@ teardown_mavlink() {
         pkill -f "mavproxy" 2>/dev/null || true
         sleep 1
     fi
+    # Kill any stale wpa_supplicant processes — broad kill ensures no
+    # leftover association state blocks the next connect attempt
+    pkill -f "wpa_supplicant" 2>/dev/null || true
+    pkill -f "dhcpcd" 2>/dev/null || true
+    ip link set wlan0 down 2>/dev/null || true
+    sleep 1
     WLAN0_RFKILL_IDX=$(cat /sys/class/net/wlan0/phy80211/rfkill*/index 2>/dev/null)
     if [[ -n "$WLAN0_RFKILL_IDX" ]]; then
-        # rfkill userspace tool not available — block via sysfs directly
+        # Full rfkill cycle — block then unblock forces driver reset,
+        # clearing any stale association state that ip link down alone
+        # does not clear
         echo 1 | tee "/sys/class/rfkill/rfkill${WLAN0_RFKILL_IDX}/soft" >/dev/null 2>&1 || true
+        sleep 1
+        echo 0 | tee "/sys/class/rfkill/rfkill${WLAN0_RFKILL_IDX}/soft" >/dev/null 2>&1 || true
+        sleep 1
     fi
     ip link set wlan0 down 2>/dev/null || true
     rm -f "$MAVLINK_CONF" 2>/dev/null || true
@@ -1546,20 +1557,18 @@ while true; do
         echo "  [R]    — rescan"
         echo "  [UID]  — enter a different 6-digit UID"
         echo "  [SSID] — enter full network name manually"
-        echo "  [F]    — fix DNS"
         echo "  [X]    — cancel"
         echo ""
-        VALID_CHOICES="Y|R|UID|SSID|F|X"
+        VALID_CHOICES="Y|R|UID|SSID|X"
     else
         echo "  No ELRS backpack detected"
         echo ""
         echo "  [R]    — rescan"
         echo "  [UID]  — enter 6-digit code from backpack"
         echo "  [SSID] — enter full network name manually"
-        echo "  [F]    — fix DNS"
         echo "  [X]    — cancel"
         echo ""
-        VALID_CHOICES="R|UID|SSID|F|X"
+        VALID_CHOICES="R|UID|SSID|X"
     fi
 
     read -r -p "  Choice: " MODE_INPUT
@@ -1573,12 +1582,7 @@ while true; do
         continue
     fi
 
-    if [[ "$MODE_INPUT" == "F" ]]; then
-        ip route del default dev wlan0 2>/dev/null || true
-        echo "nameserver 8.8.8.8" > /etc/resolv.conf
-        echo "  DNS restored — default route via wlan0 removed"
-        continue
-    fi
+
 
     break
 done
