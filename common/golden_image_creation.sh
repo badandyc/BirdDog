@@ -311,7 +311,7 @@ mesh_ip() {
 
 peer_macs() {
     # Direct (1-hop) batman-adv neighbors
-    batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{print $1}' | sort -u
+    batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{print $2}' | sort -u
 }
 
 service_state() {
@@ -369,8 +369,8 @@ cmd_status() {
             HOST=$(resolve_peer "$MAC")
             PEER_IP=$(ip neigh show dev "$BAT_IF" 2>/dev/null | grep "$MAC" | awk '{print $1}' | head -n1)
             # TQ = Transmission Quality, batman-adv metric (0-255, higher=better)
-            TQ=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$1==mac {print $3; exit}')
-            LASTSEEN=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$1==mac {print $2; exit}')
+            TQ=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$2==mac {print $4; exit}')
+            LASTSEEN=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$2==mac {print $3; exit}')
             printf "  %-14s %-16s %-10s %-10s\n" \
                 "${HOST:-$MAC}" "${PEER_IP:--}" "${TQ:--}" "${LASTSEEN:--}"
         done < <(peer_macs)
@@ -398,8 +398,8 @@ cmd_peers() {
         local HOST PEER_IP TQ LASTSEEN
         HOST=$(resolve_peer "$MAC")
         PEER_IP=$(ip neigh show dev "$BAT_IF" 2>/dev/null | grep "$MAC" | awk '{print $1}' | head -n1)
-        TQ=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$1==mac {print $3; exit}')
-        LASTSEEN=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$1==mac {print $2; exit}')
+        TQ=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$2==mac {print $4; exit}')
+        LASTSEEN=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$2==mac {print $3; exit}')
 
         echo ""
         echo "  Peer     : ${HOST:-unknown}"
@@ -441,7 +441,7 @@ cmd_map() {
         COUNT=$((COUNT+1))
         local HOST TQ
         HOST=$(resolve_peer "$MAC")
-        TQ=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$1==mac {print $3; exit}')
+        TQ=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$2==mac {print $4; exit}')
         echo "    $SELF  <--[TQ:${TQ:--}]-->  $HOST"
     done < <(peer_macs)
 
@@ -493,7 +493,7 @@ cmd_graph() {
         i=$((i+1))
         local HOST TQ
         HOST=$(resolve_peer "$MAC")
-        TQ=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$1==mac {print $3; exit}')
+        TQ=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$2==mac {print $4; exit}')
         if [[ "$i" -eq "$PEERS" ]]; then
             echo "  └── $HOST  (TQ:${TQ:--})"
         else
@@ -1318,7 +1318,7 @@ check_for_peer() {
 
     # Check batman-adv neighbor table for any direct peers
     local NEIGH
-    NEIGH=$(batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{print $1}' | head -1)
+    NEIGH=$(batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{print $2}' | head -1)
     if [[ -n "$NEIGH" ]]; then
         PEER_FOUND=1
     else
@@ -1332,7 +1332,7 @@ check_for_peer() {
             [[ "$SLOT" -lt 1 || "$SLOT" -gt 25 ]] && continue
             local TARGET="10.10.20.$((SLOT * 10))"
             ping -c1 -W1 "$TARGET" >/dev/null 2>&1 || true
-            NEIGH=$(batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{print $1}' | head -1)
+            NEIGH=$(batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{print $2}' | head -1)
             if [[ -n "$NEIGH" ]]; then
                 PEER_FOUND=1
                 break
@@ -1443,7 +1443,7 @@ while true; do
                 [[ -z "$MAC" ]] && continue
                 PEER_IP=$(ip neigh show dev "$BAT_IF" 2>/dev/null | awk -v mac="$MAC" '$0 ~ mac {print $1; exit}')
                 [[ -n "$PEER_IP" ]] && ping -c1 -W1 "$PEER_IP" >/dev/null 2>&1 || true
-            done < <(batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{print $1}')
+            done < <(batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{print $2}')
             sleep $(( 35 + RANDOM % 10 ))
             ;;
         *)          sleep 5  ;;
@@ -1990,6 +1990,10 @@ if [[ "$BIRDDOG_MODE" == "full" ]]; then
     echo "====================================="
     echo "Rebooting in 3 seconds..."
     echo "====================================="
+    # Release DHCP lease before reboot so the router clears the old
+    # hostname-based lease. On next boot dhclient uses MAC identity
+    # and gets a stable lease it will hold across subsequent reboots.
+    dhclient -r eth0 2>/dev/null || true
     sleep 3
     reboot
 else
