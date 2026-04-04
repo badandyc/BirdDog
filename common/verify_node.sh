@@ -27,7 +27,7 @@ else
 fi
 
 if [[ "$ROLE" != "UNKNOWN" ]]; then
-    echo "  Mesh IP : $MESH_IP"
+    echo "  Mesh IP : $MESH_IP  (on bat0)"
 fi
 echo ""
 
@@ -80,34 +80,34 @@ echo "---------------------------------"
 
 if ip link show wlan0 >/dev/null 2>&1; then
     STATE=$(ip link show wlan0 | awk '/state/{print $9}')
-    pass "wlan0 present (onboard — $STATE, blocked)"
+    pass "wlan0 present (onboard brcmfmac — $STATE, blocked)"
 else
     warn "wlan0 not present — check udev rules"
 fi
 
-if ip link show wlan1 >/dev/null 2>&1; then
-    MODE=$(iw dev wlan1 info 2>/dev/null | awk '/type/{print $2}')
-    pass "wlan1 present — mesh adapter (mode: $MODE)"
+if ip link show wlan_mesh_5 >/dev/null 2>&1; then
+    MODE=$(iw dev wlan_mesh_5 info 2>/dev/null | awk '/type/{print $2}')
+    pass "wlan_mesh_5 present — MT7612U mesh adapter (mode: $MODE)"
 else
-    fail "wlan1 missing — Comfast adapter not detected"
+    fail "wlan_mesh_5 missing — Comfast adapter not detected"
 fi
 
 if [[ "$ROLE" == "BDM" ]]; then
-    if ip link show wlan2 >/dev/null 2>&1; then
-        MODE=$(iw dev wlan2 info 2>/dev/null | awk '/type/{print $2}')
-        pass "wlan2 present — AP adapter (mode: $MODE)"
+    if ip link show wlan_ap >/dev/null 2>&1; then
+        MODE=$(iw dev wlan_ap info 2>/dev/null | awk '/type/{print $2}')
+        pass "wlan_ap present — Edimax AP adapter (mode: $MODE)"
     else
-        fail "wlan2 missing — Edimax adapter not detected"
+        fail "wlan_ap missing — Edimax adapter not detected"
     fi
 fi
 
 # -------------------------------------------------------
-# Mesh
+# Mesh (batman-adv)
 # -------------------------------------------------------
 
 echo ""
 echo "---------------------------------"
-echo "Mesh"
+echo "Mesh (batman-adv)"
 echo "---------------------------------"
 
 if systemctl is-active --quiet birddog-mesh.service; then
@@ -116,32 +116,52 @@ else
     warn "birddog-mesh service not running"
 fi
 
-WLAN1_TYPE=$(iw dev wlan1 info 2>/dev/null | awk '/type/{print $2}')
-if [[ "$WLAN1_TYPE" == "mesh" ]]; then
-    pass "wlan1 in mesh mode"
+# bat0 is the batman-adv virtual L3 interface — its presence and wlan_mesh_5
+# attachment confirm batman-adv is active
+if ip link show bat0 >/dev/null 2>&1; then
+    if batctl if 2>/dev/null | grep -q "wlan_mesh_5"; then
+        pass "bat0 up — wlan_mesh_5 attached to batman-adv"
+    else
+        warn "bat0 exists but wlan_mesh_5 not attached — batman-adv not fully up"
+    fi
 else
-    warn "wlan1 not in mesh mode (type: ${WLAN1_TYPE:-unknown}) — may still be converging"
+    warn "bat0 not present — batman-adv not active (may still be converging)"
+fi
+
+MESH_IF_TYPE=$(iw dev wlan_mesh_5 info 2>/dev/null | awk '/type/{print $2}')
+if [[ "$MESH_IF_TYPE" == "mesh" ]]; then
+    pass "wlan_mesh_5 in 802.11s mesh point mode"
+else
+    warn "wlan_mesh_5 not in mesh point mode (type: ${MESH_IF_TYPE:-unknown}) — may still be converging"
 fi
 
 if [[ "$ROLE" != "UNKNOWN" ]]; then
-    if ip addr show wlan1 2>/dev/null | grep -q "$MESH_IP"; then
-        pass "Mesh IP assigned: $MESH_IP"
+    if ip addr show bat0 2>/dev/null | grep -q "$MESH_IP"; then
+        pass "Mesh IP assigned on bat0: $MESH_IP"
     else
-        warn "Mesh IP $MESH_IP not on wlan1 — may still be converging"
+        warn "Mesh IP $MESH_IP not on bat0 — may still be converging"
     fi
 fi
 
 if [[ "$ROLE" != "UNKNOWN" ]]; then
     PEER_FOUND=0
-    for TARGET in 10.10.20.1 10.10.20.2 10.10.20.3 10.10.20.4 10.10.20.5 \
-                  10.10.20.10 10.10.20.20 10.10.20.30 10.10.20.40 10.10.20.50; do
-        [[ "$TARGET" == "$MESH_IP" ]] && continue
-        if ping -c1 -W1 "$TARGET" >/dev/null 2>&1; then
-            pass "Mesh peer reachable: $TARGET"
-            PEER_FOUND=1
-            break
-        fi
-    done
+    # Check batman-adv neighbor table first
+    NEIGH=$(batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{print $1}' | head -1)
+    if [[ -n "$NEIGH" ]]; then
+        pass "batman-adv direct neighbor present: $NEIGH"
+        PEER_FOUND=1
+    else
+        # Fall back to pinging known mesh IPs via bat0
+        for TARGET in 10.10.20.1 10.10.20.2 10.10.20.3 10.10.20.4 10.10.20.5 \
+                      10.10.20.10 10.10.20.20 10.10.20.30 10.10.20.40 10.10.20.50; do
+            [[ "$TARGET" == "$MESH_IP" ]] && continue
+            if ping -c1 -W1 -I bat0 "$TARGET" >/dev/null 2>&1; then
+                pass "Mesh peer reachable via bat0: $TARGET"
+                PEER_FOUND=1
+                break
+            fi
+        done
+    fi
     [[ "$PEER_FOUND" -eq 0 ]] && warn "No mesh peers reachable yet"
 fi
 
@@ -164,9 +184,9 @@ if [[ "$ROLE" == "BDM" ]]; then
         && pass "dnsmasq running" \
         || fail "dnsmasq not running"
 
-    ip addr show wlan2 2>/dev/null | grep -q "10.10.10.1" \
-        && pass "AP IP configured: 10.10.10.1" \
-        || fail "AP IP 10.10.10.1 missing on wlan2"
+    ip addr show wlan_ap 2>/dev/null | grep -q "10.10.10.1" \
+        && pass "AP IP configured: 10.10.10.1 on wlan_ap" \
+        || fail "AP IP 10.10.10.1 missing on wlan_ap"
 
     ss -lntup 2>/dev/null | grep -q ":67 " \
         && pass "DHCP listening on port 67" \
@@ -238,8 +258,8 @@ if [[ "$ROLE" == "BDC" ]]; then
         echo "     BDM Host  : $BDM_HOST"
         echo "     Stream    : $STREAM_NAME"
 
-        if ping -c1 -W2 -I wlan1 "$BDM_HOST" >/dev/null 2>&1; then
-            pass "BDM reachable: $BDM_HOST (mesh)"
+        if ping -c1 -W2 -I bat0 "$BDM_HOST" >/dev/null 2>&1; then
+            pass "BDM reachable: $BDM_HOST (mesh via bat0)"
         elif ping -c1 -W2 "$BDM_HOST" >/dev/null 2>&1; then
             pass "BDM reachable: $BDM_HOST (eth0 — mesh not yet available)"
         else
@@ -258,8 +278,8 @@ if [[ "$ROLE" == "BDC" ]]; then
         || warn "rpicam-vid not active — check camera ribbon cable"
 
     if pgrep -f ffmpeg >/dev/null 2>&1; then
-        if ping -c1 -W1 -I wlan1 "$BDM_HOST" >/dev/null 2>&1; then
-            pass "ffmpeg streaming (mesh)"
+        if ping -c1 -W1 -I bat0 "$BDM_HOST" >/dev/null 2>&1; then
+            pass "ffmpeg streaming (mesh via bat0)"
         else
             pass "ffmpeg streaming (eth0 — mesh not yet available)"
         fi
@@ -276,7 +296,6 @@ fi
 echo ""
 echo "================================="
 
-# ── determine status label ──
 if [[ "$FAIL" -eq 1 ]]; then
     STATUS="FAILED"
 elif [[ "$ROLE" == "UNKNOWN" ]]; then
