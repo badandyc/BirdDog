@@ -124,7 +124,7 @@ if [[ "$BIRDDOG_MODE" == "full" ]]; then
     fi
     WLAN0_RFKILL_IDX=$(cat /sys/class/net/wlan0/phy80211/rfkill*/index 2>/dev/null)
     if [[ -n "$WLAN0_RFKILL_IDX" ]]; then
-        echo 1 > "/sys/class/rfkill/rfkill${WLAN0_RFKILL_IDX}/soft" 2>/dev/null || true
+        echo 1 | tee "/sys/class/rfkill/rfkill${WLAN0_RFKILL_IDX}/soft" >/dev/null 2>&1 || true
     fi
     ip link set wlan0 down 2>/dev/null || true
     rm -f "$MAVLINK_CONF_PATH" 2>/dev/null || true
@@ -254,7 +254,7 @@ Before=network.target
 Type=oneshot
 # Block onboard wifi by subsystem — sdio is always the onboard brcmfmac.
 # USB adapters show as usb subsystem and are never blocked here.
-ExecStart=/bin/bash -c '    sleep 3;     for rf in /sys/class/rfkill/rfkill*/; do         subsystem=$(basename $(readlink $rf/device/device/subsystem 2>/dev/null) 2>/dev/null);         idx=$(cat $rf/index 2>/dev/null);         if [[ "$subsystem" == "sdio" && -n "$idx" ]]; then             echo 1 > "/sys/class/rfkill/rfkill${idx}/soft" 2>/dev/null || true;         fi;     done'
+ExecStart=/bin/bash -c '    sleep 3;     for rf in /sys/class/rfkill/rfkill*/; do         subsystem=$(basename $(readlink $rf/device/device/subsystem 2>/dev/null) 2>/dev/null);         idx=$(cat $rf/index 2>/dev/null);         if [[ "$subsystem" == "sdio" && -n "$idx" ]]; then             echo 1 | tee "/sys/class/rfkill/rfkill${idx}/soft" >/dev/null 2>&1 || true;         fi;     done'
 RemainAfterExit=yes
 
 [Install]
@@ -1504,7 +1504,7 @@ teardown_mavlink() {
     WLAN0_RFKILL_IDX=$(cat /sys/class/net/wlan0/phy80211/rfkill*/index 2>/dev/null)
     if [[ -n "$WLAN0_RFKILL_IDX" ]]; then
         # rfkill userspace tool not available — block via sysfs directly
-        echo 1 > "/sys/class/rfkill/rfkill${WLAN0_RFKILL_IDX}/soft" 2>/dev/null || true
+        echo 1 | tee "/sys/class/rfkill/rfkill${WLAN0_RFKILL_IDX}/soft" >/dev/null 2>&1 || true
     fi
     ip link set wlan0 down 2>/dev/null || true
     rm -f "$MAVLINK_CONF" 2>/dev/null || true
@@ -1515,7 +1515,7 @@ teardown_mavlink
 WLAN0_RFKILL_IDX=$(cat /sys/class/net/wlan0/phy80211/rfkill*/index 2>/dev/null)
 if [[ -n "$WLAN0_RFKILL_IDX" ]]; then
     # rfkill userspace tool not available — unblock via sysfs directly
-    echo 0 > "/sys/class/rfkill/rfkill${WLAN0_RFKILL_IDX}/soft" 2>/dev/null || true
+    echo 0 | tee "/sys/class/rfkill/rfkill${WLAN0_RFKILL_IDX}/soft" >/dev/null 2>&1 || true
 fi
 sleep 1
 sudo ip link set wlan0 up 2>/dev/null || true
@@ -1524,7 +1524,7 @@ sleep 5
 block_wlan0() {
     if [[ -n "$WLAN0_RFKILL_IDX" ]]; then
         # rfkill userspace tool not available — block via sysfs directly
-        echo 1 > "/sys/class/rfkill/rfkill${WLAN0_RFKILL_IDX}/soft" 2>/dev/null || true
+        echo 1 | tee "/sys/class/rfkill/rfkill${WLAN0_RFKILL_IDX}/soft" >/dev/null 2>&1 || true
     fi
     ip link set wlan0 down 2>/dev/null || true
 }
@@ -1873,7 +1873,7 @@ case "$1" in
                         sudo pkill -f "mavproxy" 2>/dev/null || true
                         sleep 1
                         WLAN0_RFKILL_IDX=$(cat /sys/class/net/wlan0/phy80211/rfkill*/index 2>/dev/null)
-                        [[ -n "$WLAN0_RFKILL_IDX" ]] && echo 1 > "/sys/class/rfkill/rfkill${WLAN0_RFKILL_IDX}/soft" 2>/dev/null || true
+                        [[ -n "$WLAN0_RFKILL_IDX" ]] && echo 1 | tee "/sys/class/rfkill/rfkill${WLAN0_RFKILL_IDX}/soft" >/dev/null 2>&1 || true
                         sudo ip link set wlan0 down 2>/dev/null || true
                         sudo ip route del default dev wlan0 2>/dev/null || true
                         echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf >/dev/null
@@ -1970,6 +1970,8 @@ echo "  Starting birddog_day hardware daemon..."
 systemctl daemon-reload
 systemctl enable birddog_day.service
 systemctl restart birddog_day.service
+# Allow birddog_day to complete boot_sequence (3s settle + beep) before reboot
+sleep 6
 
 if systemctl is-active --quiet birddog_day.service; then
     echo "  birddog_day  : running"
