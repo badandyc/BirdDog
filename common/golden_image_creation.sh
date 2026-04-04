@@ -222,6 +222,16 @@ EOF
     fi
 
     # --------------------------------------------------
+    echo "[Phase 1.75] batctl capability — cap_net_admin"
+    # --------------------------------------------------
+
+    # batctl requires cap_net_admin to access batman-adv kernel interfaces.
+    # setcap grants this capability directly to the binary so any user can
+    # run batctl without sudo — cleaner than a sudoers rule.
+    setcap cap_net_admin+eip /usr/sbin/batctl
+    echo "  cap_net_admin granted → /usr/sbin/batctl"
+
+    # --------------------------------------------------
     echo "[Phase 1.8] Radio interface naming (udev)"
     # --------------------------------------------------
 
