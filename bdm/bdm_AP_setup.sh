@@ -18,69 +18,26 @@ if [[ "$EUID" -ne 0 ]]; then
     exit 1
 fi
 
-AP_IF="wlan2"
+AP_IF="wlan_ap"
 AP_IP="10.10.10.1/24"
 SSID="BirdDog"
 PASSPHRASE="StrongPass123"
 
 # -------------------------------------------------------
-# Phase 1 — Write all network config files FIRST
+# Phase 1 — Network config files
 # -------------------------------------------------------
 
 echo ""
 echo "=== Writing network configuration ==="
 
+# NetworkManager is purged in the golden image — eth0 is managed by ifupdown
+# (/etc/network/interfaces). We only need a systemd-networkd file for wlan_ap
+# so it gets the static AP IP. wlan_mesh_5 is managed entirely by batman-adv
+# and must not be touched by systemd-networkd.
+
 mkdir -p /etc/systemd/network
 
-ETH0_IP=$(ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet )[^/]+' | head -1)
-ETH0_GW=$(ip route show default dev eth0 2>/dev/null | grep -oP '(?<=via )[^ ]+' | head -1)
-ETH0_PREFIX=$(ip -4 addr show eth0 2>/dev/null | grep -oP '(?<=inet )[0-9.]+/\K[0-9]+' | head -1)
-ETH0_PREFIX=${ETH0_PREFIX:-24}
-
-if [[ -n "$ETH0_IP" && -n "$ETH0_GW" ]]; then
-    echo "  eth0 current IP : $ETH0_IP/$ETH0_PREFIX  gw $ETH0_GW"
-    echo "  Holding IP through transition..."
-
-    cat > /etc/systemd/network/10-eth0.network << EOF
-[Match]
-Name=eth0
-
-[Network]
-Address=${ETH0_IP}/${ETH0_PREFIX}
-Gateway=${ETH0_GW}
-DNS=8.8.8.8
-ConfigureWithoutCarrier=yes
-
-[DHCP]
-ClientIdentifier=mac
-SendHostname=yes
-EOF
-
-else
-    echo "  WARNING: could not detect eth0 IP — falling back to DHCP only"
-    cat > /etc/systemd/network/10-eth0.network << EOF
-[Match]
-Name=eth0
-
-[Network]
-DHCP=yes
-
-[DHCP]
-ClientIdentifier=mac
-SendHostname=yes
-EOF
-fi
-
-cat > /etc/systemd/network/20-wlan1.network << EOF
-[Match]
-Name=wlan1
-
-[Network]
-DHCP=no
-LinkLocalAddressing=no
-EOF
-
-cat > /etc/systemd/network/30-wlan2.network << EOF
+cat > /etc/systemd/network/30-wlan_ap.network << EOF
 [Match]
 Name=${AP_IF}
 
@@ -90,60 +47,31 @@ ConfigureWithoutCarrier=yes
 LinkLocalAddressing=no
 EOF
 
-echo "  Network config files written"
+echo "  wlan_ap network config written"
+
+# Ensure systemd-networkd is running to manage wlan_ap static IP
+systemctl enable systemd-networkd 2>/dev/null || true
+systemctl start systemd-networkd 2>/dev/null || true
+networkctl reload 2>/dev/null || true
+
+echo "  systemd-networkd running"
+echo "  eth0 managed by ifupdown — SSH connection unaffected"
 
 # -------------------------------------------------------
-# Phase 2 — Regulatory + rfkill
+# Phase 2 — Regulatory domain
 # -------------------------------------------------------
 
 echo ""
-echo "=== Radio regulatory + rfkill ==="
+echo "=== Radio regulatory ==="
 
-rfkill unblock wifi || true
+# Set regulatory domain for wlan_ap (RTL8192CU, 2.4 GHz AP).
+# rfkill userspace tool is not available — unblocking is handled
+# in the hostapd service drop-in via sysfs.
 iw reg set US || true
 echo "  Regulatory domain: US"
 
 # -------------------------------------------------------
-# Phase 3 — Transition NetworkManager → systemd-networkd
-# -------------------------------------------------------
-
-echo ""
-echo "=== Transitioning to systemd-networkd ==="
-
-systemctl enable systemd-networkd
-systemctl start systemd-networkd
-
-if systemctl is-active --quiet NetworkManager 2>/dev/null; then
-    echo "  Stopping NetworkManager..."
-    systemctl stop NetworkManager || true
-fi
-systemctl disable NetworkManager 2>/dev/null || true
-
-networkctl reload 2>/dev/null || true
-networkctl reconfigure eth0 2>/dev/null || true
-
-echo "  systemd-networkd active"
-echo "  eth0 holding current IP — SSH connection stable"
-
-sleep 3
-
-cat > /etc/systemd/network/10-eth0.network << EOF
-[Match]
-Name=eth0
-
-[Network]
-DHCP=yes
-
-[DHCP]
-ClientIdentifier=mac
-SendHostname=yes
-EOF
-
-networkctl reload 2>/dev/null || true
-echo "  eth0 switched to DHCP — lease will renew on next expiry"
-
-# -------------------------------------------------------
-# Phase 4 — Configure wlan2 for AP mode
+# Phase 3 — Configure wlan_ap for AP mode
 # -------------------------------------------------------
 
 echo ""
@@ -162,7 +90,7 @@ else
 fi
 
 # -------------------------------------------------------
-# Phase 5 — hostapd
+# Phase 4 — hostapd
 # -------------------------------------------------------
 
 echo ""
@@ -197,9 +125,10 @@ fi
 
 mkdir -p /etc/systemd/system/hostapd.service.d
 
-# Unblock only the rtl8192cu (AP adapter/wlan2) by driver name.
-# rfkill unblock wifi is intentionally avoided — it would unblock all
-# radios including the onboard brcmfmac which must stay blocked.
+# Unblock only the rtl8192cu (wlan_ap) via sysfs rfkill.
+# rfkill userspace tool is not installed — sysfs is used directly.
+# Broad 'rfkill unblock wifi' is intentionally avoided — it would
+# unblock the onboard brcmfmac which must stay blocked.
 cat > /etc/systemd/system/hostapd.service.d/birddog.conf << 'EOF'
 [Unit]
 After=systemd-networkd.service birddog-block-onboard-wifi.service
@@ -210,7 +139,8 @@ ExecStartPre=/bin/bash -c '\
         drv=$(readlink -f "$rf/device/driver" 2>/dev/null | xargs basename 2>/dev/null); \
         if [[ "$drv" == "rtl8192cu" ]]; then \
             idx=$(cat "$rf/index" 2>/dev/null); \
-            rfkill unblock "$idx" && echo "unblocked rfkill$idx (rtl8192cu)" || true; \
+            echo 0 > "/sys/class/rfkill/rfkill${idx}/soft" 2>/dev/null || true; \
+            echo "unblocked rfkill${idx} (rtl8192cu)"; \
         fi; \
     done'
 EOF
@@ -220,7 +150,7 @@ systemctl enable hostapd
 echo "  hostapd enabled"
 
 # -------------------------------------------------------
-# Phase 6 — dnsmasq
+# Phase 5 — dnsmasq
 # -------------------------------------------------------
 
 echo ""
@@ -240,7 +170,7 @@ systemctl enable dnsmasq
 echo "  dnsmasq enabled"
 
 # -------------------------------------------------------
-# Phase 7 — Reload and start services
+# Phase 6 — Reload and start services
 # -------------------------------------------------------
 
 echo ""
@@ -267,7 +197,7 @@ else
 fi
 
 # -------------------------------------------------------
-# Phase 8 — MAVLink bridge note
+# Phase 7 — MAVLink bridge note
 # -------------------------------------------------------
 
 echo ""
@@ -281,12 +211,8 @@ echo "  Run 'birddog mavlink' when ELRS backpack is present"
 echo ""
 echo "=== Verification ==="
 
-echo "--- networkd managed interfaces ---"
-networkctl list 2>/dev/null || true
-
-echo ""
 echo "--- eth0 address ---"
-ip addr show eth0 | grep "inet " || echo "  eth0: no address yet (DHCP re-acquiring)"
+ip addr show eth0 | grep "inet " || echo "  eth0: no address yet"
 
 if ip link show "${AP_IF}" >/dev/null 2>&1; then
     echo ""
@@ -308,9 +234,9 @@ echo "BirdDog AP Setup Complete"
 echo "================================="
 echo ""
 echo "Interface layout:"
-echo "  eth0  → DHCP (management / SSH)"
-echo "  wlan1 → mesh backbone"
-echo "  wlan2 → AP ${AP_IP} (SSID: ${SSID})"
+echo "  eth0       → DHCP (management / SSH)"
+echo "  wlan_mesh_5 → batman-adv mesh backbone → bat0"
+echo "  wlan_ap    → AP ${AP_IP} (SSID: ${SSID})"
 echo ""
 echo "AP clients: 10.10.10.50 – 10.10.10.150"
 echo "Dashboard : http://10.10.10.1"
