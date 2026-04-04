@@ -2,6 +2,8 @@
 set -e
 set -o pipefail
 
+BIRDDOG_VERSION="2.0"
+
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG="/opt/birddog/logs/golden_image_creation_${TIMESTAMP}.log"
 
@@ -295,9 +297,14 @@ LOG="/opt/birddog/mesh/mesh_runtime.log"
 # --------------------------------------------------
 
 resolve_peer() {
-    local MAC="$1"
+    local ORIG_MAC="$1"
+    # Map originator MAC (wlan_mesh_5) → bat0 client MAC via translation table
+    # then bat0 client MAC → IP via ARP → hostname via avahi
+    local CLIENT_MAC
+    CLIENT_MAC=$(batctl tg 2>/dev/null | awk -v orig="$ORIG_MAC" '
+        $NF == orig && $2 ~ /^[0-9]/ {print $1; exit}')
     local IP
-    IP=$(ip neigh show dev "$BAT_IF" 2>/dev/null | grep "$MAC" | awk '{print $1}' | head -n1)
+    IP=$(ip neigh show dev "$BAT_IF" 2>/dev/null | awk -v mac="$CLIENT_MAC"         '$3==mac {print $1; exit}')
     if [[ -n "$IP" ]]; then
         local HOST
         HOST=$(avahi-resolve-address "$IP" 2>/dev/null | awk '{print $2}' | sed 's/\.local//')
@@ -305,7 +312,7 @@ resolve_peer() {
         echo "$IP"
         return
     fi
-    echo "$MAC"
+    echo "$ORIG_MAC"
 }
 
 mesh_joined() {
@@ -734,7 +741,7 @@ if [[ "$FETCH_FAILED" -eq 1 ]]; then
 fi
 
 echo "$REMOTE_COMMIT" > "$COMMIT_FILE"
-echo "commit-$REMOTE_COMMIT" > "$VERSION_FILE"
+echo "$BIRDDOG_VERSION" > "$VERSION_FILE"
 date -u +"%Y-%m-%dT%H:%M:%SZ" > "$BUILD_FILE"
 
 # --------------------------------------------------
@@ -1784,9 +1791,10 @@ case "$1" in
         fi
         ;;
     version)
+        VERSION=$(cat "$BIRDDOG_ROOT/version/VERSION" 2>/dev/null || echo "unknown")
         COMMIT=$(cat "$BIRDDOG_ROOT/version/COMMIT" 2>/dev/null || echo "unknown")
         BUILD=$(cat "$BIRDDOG_ROOT/version/BUILD" 2>/dev/null || echo "unknown")
-        echo "BirdDog"
+        echo "BirdDog v${VERSION}"
         echo "  Commit : $COMMIT"
         echo "  Built  : $BUILD"
         echo "  Host   : $(hostname)"
