@@ -1677,10 +1677,18 @@ echo ""
 
 MAVLINK_LOG="/opt/birddog/logs/mavlink.log"
 mkdir -p /opt/birddog/logs
+# Create log with open permissions so MAVProxy can write to it
+# when launched as a background process via sudo
+touch "$MAVLINK_LOG" && chmod 644 "$MAVLINK_LOG"
 echo "--- MAVLink Bridge started $(date) ---" > "$MAVLINK_LOG"
+# --heartbeat-rate=1 — sends heartbeats at 1 Hz to claim and maintain
+# the GCS session with the ELRS backpack. The backpack only pushes
+# telemetry to an active GCS; without consistent heartbeats it ignores
+# udpin listeners and never sends data.
 cd /tmp && /usr/local/bin/mavproxy.py --master=udpin:0.0.0.0:14550 \
     --out=udpout:10.10.10.105:14550 \
     --non-interactive \
+    --heartbeat-rate=1 \
     --default-modules="" </dev/null >> "$MAVLINK_LOG" 2>&1 &
 
 sleep 3
@@ -1691,7 +1699,7 @@ if pgrep -f "mavproxy" >/dev/null; then
 else
     echo "  WARNING: MAVProxy failed to start"
     echo "  Check log: $MAVLINK_LOG"
-    echo "  Try manually: cd /tmp && sudo mavproxy.py --master=udpin:0.0.0.0:14550 --out=udpout:10.10.10.105:14550 --non-interactive --default-modules=\"\""
+    echo "  Try manually: cd /tmp && sudo mavproxy.py --master=udpin:0.0.0.0:14550 --out=udpout:10.10.10.105:14550 --heartbeat-rate=1 --non-interactive --default-modules=\"\""
 fi
 MAVLINK_BRIDGE
 
