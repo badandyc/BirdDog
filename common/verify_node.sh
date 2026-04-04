@@ -146,7 +146,7 @@ fi
 if [[ "$ROLE" != "UNKNOWN" ]]; then
     PEER_FOUND=0
     # Check batman-adv neighbor table first
-    NEIGH=$(batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{print $1}' | head -1)
+    NEIGH=$(batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{print $2}' | head -1)
     if [[ -n "$NEIGH" ]]; then
         pass "batman-adv direct neighbor present: $NEIGH"
         PEER_FOUND=1
