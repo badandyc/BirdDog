@@ -124,7 +124,7 @@ if [[ "$BIRDDOG_MODE" == "full" ]]; then
     fi
     WLAN0_RFKILL_IDX=$(cat /sys/class/net/wlan0/phy80211/rfkill*/index 2>/dev/null)
     if [[ -n "$WLAN0_RFKILL_IDX" ]]; then
-        rfkill block "$WLAN0_RFKILL_IDX" 2>/dev/null || true
+        echo 1 > "/sys/class/rfkill/rfkill${WLAN0_RFKILL_IDX}/soft" 2>/dev/null || true
     fi
     ip link set wlan0 down 2>/dev/null || true
     rm -f "$MAVLINK_CONF_PATH" 2>/dev/null || true
@@ -254,7 +254,7 @@ Before=network.target
 Type=oneshot
 # Block onboard wifi by subsystem — sdio is always the onboard brcmfmac.
 # USB adapters show as usb subsystem and are never blocked here.
-ExecStart=/bin/bash -c '    sleep 3;     for rf in /sys/class/rfkill/rfkill*/; do         subsystem=$(basename $(readlink $rf/device/device/subsystem 2>/dev/null) 2>/dev/null);         idx=$(cat $rf/index 2>/dev/null);         if [[ "$subsystem" == "sdio" && -n "$idx" ]]; then             rfkill block "$idx" 2>/dev/null || true;         fi;     done'
+ExecStart=/bin/bash -c '    sleep 3;     for rf in /sys/class/rfkill/rfkill*/; do         subsystem=$(basename $(readlink $rf/device/device/subsystem 2>/dev/null) 2>/dev/null);         idx=$(cat $rf/index 2>/dev/null);         if [[ "$subsystem" == "sdio" && -n "$idx" ]]; then             echo 1 > "/sys/class/rfkill/rfkill${idx}/soft" 2>/dev/null || true;         fi;     done'
 RemainAfterExit=yes
 
 [Install]
@@ -1035,7 +1035,18 @@ def check_state():
             GPIO.output(PIN_LED_GREEN, GPIO.LOW)
 
     # ── red: camera ──
-    GPIO.output(PIN_LED_RED, GPIO.LOW if camera_ok() else GPIO.HIGH)
+    # BDC: camera is required — red if absent or failing
+    # BDM: camera not required — red only if /dev/video0 exists but camera_ok() fails
+    #      indicating a hardware fault rather than simply no camera attached
+    cam = camera_ok()
+    if role == "bdc":
+        GPIO.output(PIN_LED_RED, GPIO.LOW if cam else GPIO.HIGH)
+    else:
+        cam_present = os.path.exists("/dev/video0")
+        if cam_present and not cam:
+            GPIO.output(PIN_LED_RED, GPIO.HIGH)
+        else:
+            GPIO.output(PIN_LED_RED, GPIO.LOW)
 
 def update_blink(now):
     global last_blink_slow, last_blink_fast, blink_phase_slow, blink_phase_fast
@@ -1492,7 +1503,8 @@ teardown_mavlink() {
     fi
     WLAN0_RFKILL_IDX=$(cat /sys/class/net/wlan0/phy80211/rfkill*/index 2>/dev/null)
     if [[ -n "$WLAN0_RFKILL_IDX" ]]; then
-        rfkill block "$WLAN0_RFKILL_IDX" 2>/dev/null || true
+        # rfkill userspace tool not available — block via sysfs directly
+        echo 1 > "/sys/class/rfkill/rfkill${WLAN0_RFKILL_IDX}/soft" 2>/dev/null || true
     fi
     ip link set wlan0 down 2>/dev/null || true
     rm -f "$MAVLINK_CONF" 2>/dev/null || true
@@ -1502,7 +1514,8 @@ teardown_mavlink
 
 WLAN0_RFKILL_IDX=$(cat /sys/class/net/wlan0/phy80211/rfkill*/index 2>/dev/null)
 if [[ -n "$WLAN0_RFKILL_IDX" ]]; then
-    rfkill unblock "$WLAN0_RFKILL_IDX" 2>/dev/null || true
+    # rfkill userspace tool not available — unblock via sysfs directly
+    echo 0 > "/sys/class/rfkill/rfkill${WLAN0_RFKILL_IDX}/soft" 2>/dev/null || true
 fi
 sleep 1
 sudo ip link set wlan0 up 2>/dev/null || true
@@ -1510,7 +1523,8 @@ sleep 5
 
 block_wlan0() {
     if [[ -n "$WLAN0_RFKILL_IDX" ]]; then
-        rfkill block "$WLAN0_RFKILL_IDX" 2>/dev/null || true
+        # rfkill userspace tool not available — block via sysfs directly
+        echo 1 > "/sys/class/rfkill/rfkill${WLAN0_RFKILL_IDX}/soft" 2>/dev/null || true
     fi
     ip link set wlan0 down 2>/dev/null || true
 }
@@ -1859,7 +1873,7 @@ case "$1" in
                         sudo pkill -f "mavproxy" 2>/dev/null || true
                         sleep 1
                         WLAN0_RFKILL_IDX=$(cat /sys/class/net/wlan0/phy80211/rfkill*/index 2>/dev/null)
-                        [[ -n "$WLAN0_RFKILL_IDX" ]] && sudo rfkill block "$WLAN0_RFKILL_IDX" 2>/dev/null || true
+                        [[ -n "$WLAN0_RFKILL_IDX" ]] && echo 1 > "/sys/class/rfkill/rfkill${WLAN0_RFKILL_IDX}/soft" 2>/dev/null || true
                         sudo ip link set wlan0 down 2>/dev/null || true
                         sudo ip route del default dev wlan0 2>/dev/null || true
                         echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf >/dev/null
