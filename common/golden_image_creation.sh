@@ -26,12 +26,18 @@ PRECHECK_NOTES=()
 
 BIRDDOG_ROOT="/opt/birddog"
 
-for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar iw wireless-tools python3-rpi.gpio python3-pip; do
+for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar iw wireless-tools python3-rpi.gpio python3-pip batctl ifupdown; do
     if ! dpkg -s "$pkg" >/dev/null 2>&1; then
         PRECHECK_PASS=0
         PRECHECK_NOTES+=("package missing: $pkg")
     fi
 done
+
+# network-manager must be absent
+if dpkg -s "network-manager" >/dev/null 2>&1; then
+    PRECHECK_PASS=0
+    PRECHECK_NOTES+=("network-manager present — must be purged")
+fi
 
 if [[ ! -f "$BIRDDOG_ROOT/mediamtx/mediamtx" ]]; then
     PRECHECK_PASS=0
@@ -110,7 +116,6 @@ mkdir -p "$BIRDDOG_ROOT"/{bdm,bdc,mesh,common,mediamtx,web,logs,version}
 if [[ "$BIRDDOG_MODE" == "full" ]]; then
 
     # Tear down any active MAVLink bridge session before install.
-    # Kills mavproxy, blocks wlan0, and removes state file.
     MAVLINK_CONF_PATH="/opt/birddog/bdm/mavlink.conf"
     if pgrep -f "mavproxy" >/dev/null 2>&1; then
         echo "  Stopping active MAVLink bridge..."
@@ -141,9 +146,32 @@ if [[ "$BIRDDOG_MODE" == "full" ]]; then
         fi
     }
 
-    for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar iw wireless-tools python3-rpi.gpio python3-pip; do
+    for pkg in ffmpeg rpicam-apps avahi-daemon avahi-utils nginx hostapd dnsmasq git ethtool curl tar iw wireless-tools python3-rpi.gpio python3-pip batctl ifupdown; do
         install_pkg "$pkg"
     done
+
+    # Purge network-manager and rfkill — batman-adv mesh manages its own
+    # networking; NetworkManager conflicts with direct interface control.
+    # rfkill is removed because the block-onboard-wifi service uses the
+    # kernel sysfs rfkill interface directly, not the rfkill userspace tool.
+    echo ""
+    echo "  Purging network-manager and rfkill..."
+    apt-get purge -y network-manager rfkill 2>/dev/null || true
+    apt-get autoremove -y 2>/dev/null || true
+    echo "  Done"
+
+    # Configure eth0 for DHCP via ifupdown before NetworkManager is gone
+    # so SSH does not drop. ifupdown takes over eth0 immediately.
+    echo ""
+    echo "  Configuring eth0 DHCP via ifupdown..."
+    cat > /etc/network/interfaces << 'EOF'
+auto lo
+iface lo inet loopback
+
+auto eth0
+iface eth0 inet dhcp
+EOF
+    echo "  /etc/network/interfaces written"
 
     # --------------------------------------------------
     echo "[Phase 1.4] Installing MAVProxy"
@@ -191,13 +219,24 @@ if [[ "$BIRDDOG_MODE" == "full" ]]; then
     echo "[Phase 1.8] Radio interface naming (udev)"
     # --------------------------------------------------
 
+    # wlan0        — brcmfmac onboard, blocked by birddog-block-onboard-wifi.service
+    #                only unblocked temporarily for birddog mavlink (ELRS backpack)
+    # wlan_mesh_5  — MT7612U (Comfast CF-WU782AC), 5 GHz batman-adv backbone
+    # wlan_ap      — RTL8192CU (Edimax), BDM access point + Mission Planner network
+    # wlan_mesh_24 — RT5370, reserved (no rule yet — hardware not yet on hand)
     cat > /etc/udev/rules.d/72-birddog-radios.rules <<'UDEV'
 SUBSYSTEM=="net", ACTION=="add", DRIVERS=="brcmfmac",  NAME="wlan0"
-SUBSYSTEM=="net", ACTION=="add", DRIVERS=="mt76x2u",   NAME="wlan1"
-SUBSYSTEM=="net", ACTION=="add", DRIVERS=="rtl8192cu", NAME="wlan2"
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="mt76x2u",   NAME="wlan_mesh_5"
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="rtl8192cu", NAME="wlan_ap"
 UDEV
 
+    udevadm control --reload-rules
+    # Re-trigger add events for already-enumerated net interfaces so udev
+    # renames them without requiring a reboot.
+    udevadm trigger --subsystem-match=net --action=add
+    sleep 2
     echo "  udev rules written → /etc/udev/rules.d/72-birddog-radios.rules"
+    echo "  udev triggered — interfaces renamed without reboot"
 
     cat > /etc/systemd/system/birddog-block-onboard-wifi.service <<'SVC'
 [Unit]
@@ -207,9 +246,8 @@ Before=network.target
 
 [Service]
 Type=oneshot
-# Block onboard wifi by driver name — index-based blocking is unreliable
-# across reboots and hardware configurations.
-# brcmfmac is the onboard Pi WiFi driver.
+# Block onboard wifi by subsystem — sdio is always the onboard brcmfmac.
+# USB adapters show as usb subsystem and are never blocked here.
 ExecStart=/bin/bash -c '    sleep 3;     for rf in /sys/class/rfkill/rfkill*/; do         subsystem=$(basename $(readlink $rf/device/device/subsystem 2>/dev/null) 2>/dev/null);         idx=$(cat $rf/index 2>/dev/null);         if [[ "$subsystem" == "sdio" && -n "$idx" ]]; then             rfkill block "$idx" 2>/dev/null || true;         fi;     done'
 RemainAfterExit=yes
 
@@ -225,11 +263,15 @@ SVC
     echo "[Phase 1.9] Installing Mesh CLI"
     # --------------------------------------------------
 
+    # The mesh CLI uses batman-adv primitives (batctl) rather than 802.11s iw
+    # commands. bat0 is the virtual L3 interface batman-adv presents; all
+    # routing and peer queries go through it and batctl.
     cat > /usr/local/bin/mesh <<'MESHCLI'
 #!/bin/bash
 # BirdDog Mesh CLI
 
-IFACE="wlan1"
+MESH_IF="wlan_mesh_5"
+BAT_IF="bat0"
 LOG="/opt/birddog/mesh/mesh_runtime.log"
 
 # --------------------------------------------------
@@ -239,7 +281,7 @@ LOG="/opt/birddog/mesh/mesh_runtime.log"
 resolve_peer() {
     local MAC="$1"
     local IP
-    IP=$(ip neigh show dev "$IFACE" 2>/dev/null | grep "$MAC" | awk '{print $1}' | head -n1)
+    IP=$(ip neigh show dev "$BAT_IF" 2>/dev/null | grep "$MAC" | awk '{print $1}' | head -n1)
     if [[ -n "$IP" ]]; then
         local HOST
         HOST=$(avahi-resolve-address "$IP" 2>/dev/null | awk '{print $2}' | sed 's/\.local//')
@@ -251,17 +293,19 @@ resolve_peer() {
 }
 
 mesh_joined() {
-    local TYPE
-    TYPE=$(iw dev "$IFACE" info 2>/dev/null | awk '/type/ {print $2}')
-    [[ "$TYPE" == "mesh" ]]
+    # batman-adv is active when bat0 exists and wlan_mesh_5 is listed
+    # as a batman-adv interface via batctl
+    ip link show "$BAT_IF" >/dev/null 2>&1 && \
+        batctl if 2>/dev/null | grep -q "$MESH_IF"
 }
 
 mesh_ip() {
-    ip -4 addr show "$IFACE" 2>/dev/null | grep -oP '(?<=inet )[^/]+'
+    ip -4 addr show "$BAT_IF" 2>/dev/null | grep -oP '(?<=inet )[^/]+'
 }
 
 peer_macs() {
-    iw dev "$IFACE" station dump 2>/dev/null | awk '/^Station/ {print $2}'
+    # Direct (1-hop) batman-adv neighbors
+    batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{print $1}' | sort -u
 }
 
 service_state() {
@@ -287,7 +331,7 @@ cmd_status() {
     echo "  Mesh service   : $(service_state)"
 
     if ! mesh_joined; then
-        echo "  Interface      : NOT in mesh mode"
+        echo "  Interface      : NOT in mesh (batman-adv not active)"
         echo ""
         echo "  Run: birddog verify  for full diagnostics"
         echo ""
@@ -298,7 +342,7 @@ cmd_status() {
     IP=$(mesh_ip)
     PEERS=$(peer_macs | wc -l)
 
-    echo "  Interface      : mesh (wlan1)"
+    echo "  Interface      : wlan_mesh_5 → bat0 (batman-adv)"
     echo "  Mesh IP        : ${IP:-unassigned}"
     echo "  Direct peers   : $PEERS"
 
@@ -312,16 +356,17 @@ cmd_status() {
     echo ""
 
     if [[ "$PEERS" -gt 0 ]]; then
-        printf "  %-14s %-16s %-10s %-10s\n" "Peer" "IP" "Signal" "TX Rate"
+        printf "  %-14s %-16s %-10s %-10s\n" "Peer" "IP" "TQ" "Last seen"
         printf "  %s\n" "---------------------------------------------------"
         while IFS= read -r MAC; do
-            local HOST PEER_IP SIG RATE
+            local HOST PEER_IP TQ LASTSEEN
             HOST=$(resolve_peer "$MAC")
-            PEER_IP=$(ip neigh show dev "$IFACE" 2>/dev/null | grep "$MAC" | awk '{print $1}' | head -n1)
-            SIG=$(iw dev "$IFACE" station dump 2>/dev/null | grep -A30 "$MAC" | awk '/signal:/ {print $2; exit}')
-            RATE=$(iw dev "$IFACE" station dump 2>/dev/null | grep -A30 "$MAC" | awk '/tx bitrate:/ {print $3; exit}')
+            PEER_IP=$(ip neigh show dev "$BAT_IF" 2>/dev/null | grep "$MAC" | awk '{print $1}' | head -n1)
+            # TQ = Transmission Quality, batman-adv metric (0-255, higher=better)
+            TQ=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$1==mac {print $3; exit}')
+            LASTSEEN=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$1==mac {print $2; exit}')
             printf "  %-14s %-16s %-10s %-10s\n" \
-                "${HOST:-$MAC}" "${PEER_IP:--}" "${SIG:--} dBm" "${RATE:--} Mbps"
+                "${HOST:-$MAC}" "${PEER_IP:--}" "${TQ:--}" "${LASTSEEN:--}"
         done < <(peer_macs)
         echo ""
     fi
@@ -337,31 +382,25 @@ cmd_peers() {
     echo "================================="
 
     if ! mesh_joined; then
-        echo "  Not in mesh mode"
+        echo "  Not in mesh (batman-adv not active)"
         return
     fi
 
     local COUNT=0
     while IFS= read -r MAC; do
         COUNT=$((COUNT+1))
-        local HOST PEER_IP SIG RATE TX_BYTES RX_BYTES INACTIVE
+        local HOST PEER_IP TQ LASTSEEN
         HOST=$(resolve_peer "$MAC")
-        PEER_IP=$(ip neigh show dev "$IFACE" 2>/dev/null | grep "$MAC" | awk '{print $1}' | head -n1)
-        SIG=$(iw dev "$IFACE" station dump 2>/dev/null | grep -A30 "$MAC" | awk '/signal:/ {print $2; exit}')
-        RATE=$(iw dev "$IFACE" station dump 2>/dev/null | grep -A30 "$MAC" | awk '/tx bitrate:/ {print $3; exit}')
-        TX_BYTES=$(iw dev "$IFACE" station dump 2>/dev/null | grep -A30 "$MAC" | awk '/tx bytes:/ {print $3; exit}')
-        RX_BYTES=$(iw dev "$IFACE" station dump 2>/dev/null | grep -A30 "$MAC" | awk '/rx bytes:/ {print $3; exit}')
-        INACTIVE=$(iw dev "$IFACE" station dump 2>/dev/null | grep -A30 "$MAC" | awk '/inactive time:/ {print $3; exit}')
+        PEER_IP=$(ip neigh show dev "$BAT_IF" 2>/dev/null | grep "$MAC" | awk '{print $1}' | head -n1)
+        TQ=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$1==mac {print $3; exit}')
+        LASTSEEN=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$1==mac {print $2; exit}')
 
         echo ""
         echo "  Peer     : ${HOST:-unknown}"
         echo "  MAC      : $MAC"
         echo "  IP       : ${PEER_IP:--}"
-        echo "  Signal   : ${SIG:--} dBm"
-        echo "  TX Rate  : ${RATE:--} Mbps"
-        echo "  TX Bytes : ${TX_BYTES:--}"
-        echo "  RX Bytes : ${RX_BYTES:--}"
-        echo "  Inactive : ${INACTIVE:--} ms"
+        echo "  TQ       : ${TQ:--}  (Transmission Quality 0-255)"
+        echo "  Last seen: ${LASTSEEN:--}"
     done < <(peer_macs)
 
     [[ "$COUNT" -eq 0 ]] && echo "" && echo "  No peers currently visible"
@@ -378,7 +417,7 @@ cmd_map() {
     echo "================================="
 
     if ! mesh_joined; then
-        echo "  Not in mesh mode"
+        echo "  Not in mesh (batman-adv not active)"
         return
     fi
 
@@ -394,28 +433,30 @@ cmd_map() {
     local COUNT=0
     while IFS= read -r MAC; do
         COUNT=$((COUNT+1))
-        local HOST SIG
+        local HOST TQ
         HOST=$(resolve_peer "$MAC")
-        SIG=$(iw dev "$IFACE" station dump 2>/dev/null | grep -A30 "$MAC" | awk '/signal:/ {print $2; exit}')
-        echo "    $SELF  <--[${SIG:--} dBm]-->  $HOST"
+        TQ=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$1==mac {print $3; exit}')
+        echo "    $SELF  <--[TQ:${TQ:--}]-->  $HOST"
     done < <(peer_macs)
 
     [[ "$COUNT" -eq 0 ]] && echo "    (no direct peers)"
 
     echo ""
-    echo "  Mesh routes:"
+    echo "  Mesh routes (batman-adv originators):"
     local ROUTES=0
     while IFS= read -r line; do
+        [[ "$line" =~ ^[0-9a-f]{2}: ]] || continue
         ROUTES=$((ROUTES+1))
-        local DEST NEXTHOP DEST_HOST NEXT_HOST
+        local DEST NEXTHOP
         DEST=$(echo "$line" | awk '{print $1}')
-        NEXTHOP=$(echo "$line" | grep -oP '(?<=via )[0-9.]+' || true)
-        DEST_HOST=$(avahi-resolve-address "$DEST" 2>/dev/null | awk '{print $2}' | sed 's/\.local//')
-        NEXT_HOST=$(avahi-resolve-address "$NEXTHOP" 2>/dev/null | awk '{print $2}' | sed 's/\.local//')
-        echo "    ${DEST_HOST:-$DEST}  →  ${NEXT_HOST:-$NEXTHOP}"
-    done < <(ip route show dev "$IFACE" 2>/dev/null | grep via)
+        NEXTHOP=$(echo "$line" | awk '{print $3}')
+        local DEST_HOST NEXT_HOST
+        DEST_HOST=$(resolve_peer "$DEST")
+        NEXT_HOST=$(resolve_peer "$NEXTHOP")
+        echo "    ${DEST_HOST:-$DEST}  →  via ${NEXT_HOST:-$NEXTHOP}"
+    done < <(batctl o 2>/dev/null)
 
-    [[ "$ROUTES" -eq 0 ]] && echo "    (no multi-hop routes)"
+    [[ "$ROUTES" -eq 0 ]] && echo "    (no originators yet)"
     echo ""
 }
 
@@ -429,7 +470,7 @@ cmd_graph() {
     echo "================================="
 
     if ! mesh_joined; then
-        echo "  Not in mesh mode"
+        echo "  Not in mesh (batman-adv not active)"
         return
     fi
 
@@ -444,13 +485,13 @@ cmd_graph() {
     local i=0
     while IFS= read -r MAC; do
         i=$((i+1))
-        local HOST SIG
+        local HOST TQ
         HOST=$(resolve_peer "$MAC")
-        SIG=$(iw dev "$IFACE" station dump 2>/dev/null | grep -A30 "$MAC" | awk '/signal:/ {print $2; exit}')
+        TQ=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$1==mac {print $3; exit}')
         if [[ "$i" -eq "$PEERS" ]]; then
-            echo "  └── $HOST  (${SIG:--} dBm)"
+            echo "  └── $HOST  (TQ:${TQ:--})"
         else
-            echo "  ├── $HOST  (${SIG:--} dBm)"
+            echo "  ├── $HOST  (TQ:${TQ:--})"
         fi
     done < <(peer_macs)
 
@@ -500,7 +541,7 @@ cmd_ping() {
     echo ""
 
     if ! mesh_joined; then
-        echo "  Not in mesh mode"
+        echo "  Not in mesh (batman-adv not active)"
         return
     fi
 
@@ -513,7 +554,7 @@ cmd_ping() {
         local SELF_IP
         SELF_IP=$(mesh_ip)
         [[ "$TARGET" == "$SELF_IP" ]] && continue
-        if ping -c1 -W1 -I "$IFACE" "$TARGET" >/dev/null 2>&1; then
+        if ping -c1 -W1 -I "$BAT_IF" "$TARGET" >/dev/null 2>&1; then
             local HOST
             HOST=$(avahi-resolve-address "$TARGET" 2>/dev/null | awk '{print $2}' | sed 's/\.local//')
             echo "  $TARGET  ${HOST:+($HOST)}  REACHABLE"
@@ -526,13 +567,19 @@ cmd_ping() {
 }
 
 # --------------------------------------------------
-# SCAN
+# ORIGINATORS
 # --------------------------------------------------
 
-cmd_scan() {
-    echo "Scanning for mesh networks on wlan1..."
+cmd_originators() {
+    echo "================================="
+    echo "BirdDog batman-adv Originators"
+    echo "================================="
     echo ""
-    iw dev "$IFACE" scan 2>/dev/null | grep -E 'SSID|signal' || echo "  (no results — adapter may need to leave mesh mode first)"
+    if ! mesh_joined; then
+        echo "  Not in mesh (batman-adv not active)"
+        return
+    fi
+    batctl o 2>/dev/null || echo "  (no originator table yet)"
     echo ""
 }
 
@@ -541,14 +588,14 @@ cmd_scan() {
 # --------------------------------------------------
 
 case "$1" in
-    status)     cmd_status ;;
-    peers)      cmd_peers ;;
-    map)        cmd_map ;;
-    graph)      cmd_graph ;;
-    log)        cmd_log "${2:-30}" ;;
-    watch)      cmd_watch "${2:-5}" ;;
-    ping)       cmd_ping ;;
-    scan)       cmd_scan ;;
+    status)      cmd_status ;;
+    peers)       cmd_peers ;;
+    map)         cmd_map ;;
+    graph)       cmd_graph ;;
+    log)         cmd_log "${2:-30}" ;;
+    watch)       cmd_watch "${2:-5}" ;;
+    ping)        cmd_ping ;;
+    originators) cmd_originators ;;
     ""  | help)
         echo ""
         echo "================================="
@@ -556,13 +603,13 @@ case "$1" in
         echo "================================="
         echo ""
         echo "  mesh status        mesh health + peer table"
-        echo "  mesh peers         detailed RF metrics per peer"
-        echo "  mesh map           direct links + multi-hop routes"
+        echo "  mesh peers         detailed batman-adv metrics per peer"
+        echo "  mesh map           direct links + originator routes"
         echo "  mesh graph         topology tree"
         echo "  mesh log [N]       last N lines of runtime log (default 30)"
         echo "  mesh watch [N]     live status refresh every N seconds (default 5)"
         echo "  mesh ping          ping all expected mesh nodes"
-        echo "  mesh scan          scan for mesh SSIDs"
+        echo "  mesh originators   raw batman-adv originator table"
         echo "  mesh help          this menu"
         echo ""
         echo "================================="
@@ -866,23 +913,30 @@ def service_activating(name):
     except Exception:
         return False
 
-def mesh_joined():
+def mesh_active():
+    # batman-adv mesh is up when bat0 exists and wlan_mesh_5 is attached to it
     try:
+        bat0_exists = os.path.exists("/sys/class/net/bat0")
+        if not bat0_exists:
+            return False
         result = subprocess.run(
-            ["iw", "dev", "wlan1", "info"],
+            ["batctl", "if"],
             capture_output=True, text=True, timeout=3
         )
-        return "type mesh point" in result.stdout
+        return "wlan_mesh_5" in result.stdout
     except Exception:
         return False
 
 def mesh_has_peer():
+    # Check batman-adv neighbor table for any direct peers
     try:
         result = subprocess.run(
-            ["iw", "dev", "wlan1", "station", "dump"],
+            ["batctl", "neighbors"],
             capture_output=True, text=True, timeout=3
         )
-        return "Station" in result.stdout
+        lines = [l for l in result.stdout.splitlines()
+                 if l and not l.startswith("B.A.T") and not l.startswith("IF")]
+        return len(lines) > 0
     except Exception:
         return False
 
@@ -927,13 +981,13 @@ def check_state():
         last_sos_time = now
         sos_beep()
 
-    # ── blue: mesh ──
+    # ── blue: mesh (batman-adv via bat0) ──
     mesh_svc  = service_active("birddog-mesh")
-    wlan1_up  = os.path.exists("/sys/class/net/wlan1")
-    joined    = mesh_joined()
+    bat0_up   = os.path.exists("/sys/class/net/bat0")
+    joined    = mesh_active()
     has_peer  = mesh_has_peer()
 
-    if not mesh_svc or not wlan1_up:
+    if not mesh_svc or not bat0_up:
         led_blue_blink = 0
         GPIO.output(PIN_LED_BLUE, GPIO.LOW)
     elif not joined:
@@ -951,7 +1005,6 @@ def check_state():
         # BDM: reflect mediamtx state and stream count
         mtx_running, stream_count = mediamtx_stream_count()
         if not mtx_running:
-            # mediamtx not running — off
             led_green_blink = 0
             GPIO.output(PIN_LED_GREEN, GPIO.LOW)
         elif stream_count == 0:
@@ -1125,6 +1178,10 @@ systemctl enable birddog_day.service
 echo "  birddog_day.service installed and enabled"
 
 # ── birddog-mesh-join.sh + service ──
+# batman-adv mesh runtime. Uses 802.11s Mesh Point mode as the transport
+# layer on wlan_mesh_5, with batman-adv owning all routing via bat0.
+# mesh_fwding=0 disables 802.11s forwarding so batman-adv is the sole
+# router — this is intentional and required for correct batman-adv operation.
 
 LOG_DIR="/opt/birddog/mesh"
 mkdir -p "$LOG_DIR"
@@ -1132,14 +1189,19 @@ mkdir -p "$LOG_DIR"
 cat > /usr/local/bin/birddog-mesh-join.sh <<'MESH_RUNTIME'
 #!/bin/bash
 
-# BirdDog Mesh Runtime
-# Manages 802.11s mesh membership on wlan1.
-# Reads mesh IP from /opt/birddog/mesh/mesh.conf at startup.
+# BirdDog Mesh Runtime — batman-adv
+# Manages batman-adv mesh on wlan_mesh_5 (MT7612U, 5 GHz ch36).
+# batman-adv presents bat0 as the L3 mesh interface.
+# IP is read from /opt/birddog/mesh/mesh.conf at startup.
 # Falls back to random bootstrap IP (10.10.20.231-254) if unconfigured.
 # Runs as birddog-mesh.service (systemd).
 
 LOG="/opt/birddog/mesh/mesh_runtime.log"
 MESH_CONF="/opt/birddog/mesh/mesh.conf"
+MESH_IF="wlan_mesh_5"
+BAT_IF="bat0"
+MESH_ID="birddog-mesh"
+FREQ=5180   # channel 36, 5 GHz
 
 if [[ -f "$MESH_CONF" ]]; then
     source "$MESH_CONF"
@@ -1167,18 +1229,28 @@ log_state() {
 }
 
 interface_exists() {
-    ip link show wlan1 >/dev/null 2>&1
+    ip link show "$MESH_IF" >/dev/null 2>&1
 }
 
-mesh_joined() {
-    iw dev wlan1 info 2>/dev/null | grep -q "type mesh point"
+mesh_active() {
+    # batman-adv is up when bat0 exists and wlan_mesh_5 is attached
+    ip link show "$BAT_IF" >/dev/null 2>&1 && \
+        batctl if 2>/dev/null | grep -q "$MESH_IF"
 }
 
 assign_ip_if_missing() {
-    if ! ip addr show wlan1 2>/dev/null | grep -q "$MESH_IP"; then
-        ip addr replace "$MESH_IP" dev wlan1 >> "$LOG" 2>&1 || true
-        log "mesh IP restored: $MESH_IP"
+    if ! ip addr show "$BAT_IF" 2>/dev/null | grep -q "${MESH_IP%/*}"; then
+        ip addr replace "$MESH_IP" dev "$BAT_IF" >> "$LOG" 2>&1 || true
+        log "bat0 IP restored: $MESH_IP"
     fi
+}
+
+teardown() {
+    log "Tearing down..."
+    ip link set "$BAT_IF" down 2>/dev/null || true
+    batctl if del "$MESH_IF" 2>/dev/null || true
+    iw dev "$MESH_IF" mesh leave 2>/dev/null || true
+    ip link set "$MESH_IF" down 2>/dev/null || true
 }
 
 normalize_and_join() {
@@ -1192,40 +1264,58 @@ normalize_and_join() {
 
     log "normalize + join attempt"
 
-    ip link set wlan1 down >> "$LOG" 2>&1 || true
+    modprobe batman-adv 2>/dev/null || true
+
+    ip link set "$MESH_IF" down >> "$LOG" 2>&1 || true
     sleep 1
 
-    iw dev wlan1 set type mp >> "$LOG" 2>&1 || {
-        log "ERROR: could not set wlan1 to mesh point mode"
+    # Set interface to 802.11s Mesh Point mode — this is the transport layer
+    # batman-adv rides on top of. mesh_fwding=0 is set after join to ensure
+    # batman-adv owns all routing, not the 802.11s layer.
+    iw dev "$MESH_IF" set type mp >> "$LOG" 2>&1 || {
+        log "ERROR: could not set $MESH_IF to mesh point mode"
         return 1
     }
 
-    iw dev wlan1 set power_save off >> "$LOG" 2>&1 || true
-    ip link set wlan1 up >> "$LOG" 2>&1 || true
+    iw dev "$MESH_IF" set power_save off >> "$LOG" 2>&1 || true
+    ip link set "$MESH_IF" up >> "$LOG" 2>&1 || true
     sleep 1
 
-    iw dev wlan1 set channel 1 HT20 >> "$LOG" 2>&1 || true
-
-    iw dev wlan1 mesh join birddog-mesh freq 2412 HT20 >> "$LOG" 2>&1 || {
+    iw dev "$MESH_IF" mesh join "$MESH_ID" freq "$FREQ" HT20 >> "$LOG" 2>&1 || {
         log "mesh join failed — will retry"
         sleep $(( RANDOM % 4 + 2 ))
         LAST_JOIN_TIME=$(date +%s)
         return 1
     }
 
-    ip addr replace "$MESH_IP" dev wlan1 >> "$LOG" 2>&1 || true
-    iw dev wlan1 set mesh_param mesh_rssi_threshold -65 >> "$LOG" 2>&1 || true
+    # Disable 802.11s forwarding — batman-adv must be the sole router
+    iw dev "$MESH_IF" set mesh_param mesh_fwding 0 >> "$LOG" 2>&1 || true
+
+    # Attach wlan_mesh_5 to batman-adv and bring bat0 up
+    batctl if add "$MESH_IF" >> "$LOG" 2>&1 || true
+    ip link set "$BAT_IF" up >> "$LOG" 2>&1 || true
+    ip addr replace "$MESH_IP" dev "$BAT_IF" >> "$LOG" 2>&1 || true
+
+    # MTU sizing — 802.11s adds overhead; wlan_mesh_5 gets 1532 so bat0
+    # can present standard 1500 MTU to upper layers
+    ip link set "$MESH_IF" mtu 1532 >> "$LOG" 2>&1 || true
+    ip link set "$BAT_IF" mtu 1500 >> "$LOG" 2>&1 || true
 
     LAST_JOIN_TIME=$(date +%s)
-    log "join successful — IP: $MESH_IP"
+    log "join successful — bat0 IP: $MESH_IP"
+    return 0
 }
 
 check_for_peer() {
     local PEER_FOUND=0
 
-    if ip neigh show dev wlan1 2>/dev/null | grep -qv "FAILED"; then
+    # Check batman-adv neighbor table for any direct peers
+    local NEIGH
+    NEIGH=$(batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{print $1}' | head -1)
+    if [[ -n "$NEIGH" ]]; then
         PEER_FOUND=1
     else
+        # Probe nearby mesh IPs to stimulate ARP/neighbor discovery
         local OWN_OCTET
         OWN_OCTET=$(echo "$MESH_IP" | cut -d/ -f1 | awk -F. '{print $4}')
         local OWN_NUM=$(( OWN_OCTET / 10 ))
@@ -1235,7 +1325,8 @@ check_for_peer() {
             [[ "$SLOT" -lt 1 || "$SLOT" -gt 25 ]] && continue
             local TARGET="10.10.20.$((SLOT * 10))"
             ping -c1 -W1 "$TARGET" >/dev/null 2>&1 || true
-            if ip neigh show dev wlan1 2>/dev/null | grep -q "$TARGET"; then
+            NEIGH=$(batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{print $1}' | head -1)
+            if [[ -n "$NEIGH" ]]; then
                 PEER_FOUND=1
                 break
             fi
@@ -1249,9 +1340,8 @@ log "================================="
 log "Mesh runtime start"
 log "Hostname : $(hostname)"
 log "Mesh IP  : $MESH_IP"
-
-systemctl stop dhcpcd.service 2>/dev/null || true
-systemctl disable dhcpcd.service 2>/dev/null || true
+log "Interface: $MESH_IF → $BAT_IF"
+log "Freq     : $FREQ MHz (ch36)"
 
 sleep 5
 
@@ -1277,8 +1367,9 @@ while true; do
         log_state "$STATE"
     fi
 
-    if ! mesh_joined; then
-        log "mesh membership lost"
+    if ! mesh_active; then
+        log "batman-adv mesh lost"
+        teardown
         STATE="RECOVERY"
         log_state "$STATE"
     fi
@@ -1327,6 +1418,8 @@ while true; do
             ;;
 
         RECOVERY)
+            teardown
+            sleep 2
             normalize_and_join || true
             STATE="CONVERGING"
             log_state "$STATE"
@@ -1338,10 +1431,12 @@ while true; do
         CONVERGING) sleep 2  ;;
         SUSPECT)    sleep 5  ;;
         STEADY)
-            while IFS= read -r line; do
-                PEER_IP=$(echo "$line" | awk '{print $1}')
+            # Keep bat0 neighbors alive with periodic pings
+            while IFS= read -r MAC; do
+                [[ -z "$MAC" ]] && continue
+                PEER_IP=$(ip neigh show dev "$BAT_IF" 2>/dev/null | awk -v mac="$MAC" '$0 ~ mac {print $1; exit}')
                 [[ -n "$PEER_IP" ]] && ping -c1 -W1 "$PEER_IP" >/dev/null 2>&1 || true
-            done < <(ip neigh show dev wlan1 2>/dev/null | grep -v FAILED)
+            done < <(batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{print $1}')
             sleep $(( 35 + RANDOM % 10 ))
             ;;
         *)          sleep 5  ;;
@@ -1359,9 +1454,10 @@ cat > /usr/local/bin/birddog-mavlink-bridge.sh <<'MAVLINK_BRIDGE'
 #!/bin/bash
 
 # BirdDog MAVLink Bridge
-# Connects wlan0 to ELRS TX backpack AP and forwards
-# MAVLink UDP ports to the BirdDog AP (wlan2).
-# Not persistent — reboot resets wlan0 to blocked state.
+# Connects wlan0 (onboard brcmfmac) to ELRS TX backpack AP and bridges
+# MAVLink telemetry to Mission Planner via the BirdDog AP (wlan_ap).
+# wlan0 is blocked by default and only unblocked for the duration of
+# this session. Reboot restores the blocked state.
 
 ELRS_PASSWORD="expresslrs"
 ELRS_SSID_BASE="ExpressLRS TX Backpack"
@@ -1378,7 +1474,7 @@ echo "================================="
 echo ""
 echo "  The ELRS TX backpack broadcasts MAVLink telemetry over WiFi."
 echo "  This bridges wlan0 to the BirdDog AP so Mission Planner"
-echo "  on the AP network receives drone telemetry on UDP 14550."
+echo "  on the wlan_ap network receives drone telemetry on UDP 14550."
 echo ""
 
 teardown_mavlink() {
@@ -1395,12 +1491,8 @@ teardown_mavlink() {
     rm -f "$MAVLINK_CONF" 2>/dev/null || true
 }
 
-# Clean up any previous mavlink session before starting fresh
 teardown_mavlink
 
-# Unblock wlan0 by looking up its rfkill index directly from the interface.
-# This is more reliable than driver name matching via sysfs symlinks.
-# Will be re-blocked on [X] exit.
 WLAN0_RFKILL_IDX=$(cat /sys/class/net/wlan0/phy80211/rfkill*/index 2>/dev/null)
 if [[ -n "$WLAN0_RFKILL_IDX" ]]; then
     rfkill unblock "$WLAN0_RFKILL_IDX" 2>/dev/null || true
@@ -1491,7 +1583,6 @@ else
     echo "  SSID : $ELRS_SSID"
 fi
 
-# Write wpa_supplicant config
 WPA_CONF="/tmp/birddog_elrs_wpa.conf"
 cat > "$WPA_CONF" << EOF
 ctrl_interface=/tmp/birddog_wpa_ctrl
@@ -1509,28 +1600,22 @@ network={
 }
 EOF
 
-# Clean up any leftover BirdDog wpa_supplicant state from previous attempts
 pkill -f "wpa_supplicant.*birddog_elrs" 2>/dev/null || true
 rm -f /tmp/birddog_elrs_wpa.pid /tmp/birddog_wpa_ctrl/wlan0 2>/dev/null || true
 mkdir -p /tmp/birddog_wpa_ctrl
 sleep 1
 
-# Cycle interface to clear driver state
 ip link set wlan0 down 2>/dev/null || true
 sleep 1
 ip link set wlan0 up 2>/dev/null || true
 sleep 1
 
 echo "  Connecting to $ELRS_SSID ..."
-# Use separate ctrl interface dir to avoid conflict with system wpa_supplicant service
 wpa_supplicant -B -i wlan0 -c "$WPA_CONF" -P /tmp/birddog_elrs_wpa.pid -C /tmp/birddog_wpa_ctrl 2>/dev/null || true
 
-# Request DHCP — kill any existing dhcpcd first for clean start
-# -t 30 gives the backpack's DHCP server enough time to respond
 killall dhcpcd 2>/dev/null || true
 sleep 1
 dhcpcd wlan0 -t 30 --nohook resolv.conf 2>/dev/null || true
-# Kill dhcpcd immediately after lease — prevents it renewing and corrupting DNS/routing
 killall dhcpcd 2>/dev/null || true
 
 WLAN0_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet )[^/]+' | grep -v '^169\.254\.' | head -1)
@@ -1544,13 +1629,9 @@ fi
 
 echo "  Connected — wlan0 IP: $WLAN0_IP"
 
-# Remove default route via wlan0 — never use as internet gateway
 ip route del default dev wlan0 2>/dev/null || true
-
-# Restore DNS — backpack DHCP pushes its own DNS
 echo "nameserver 8.8.8.8" > /etc/resolv.conf
 
-# Save state for status check
 mkdir -p /opt/birddog/bdm
 cat > "$MAVLINK_CONF" << EOF
 ELRS_SSID="${ELRS_SSID}"
@@ -1562,17 +1643,13 @@ echo ""
 echo "================================="
 echo "MAVLink Bridge Active"
 echo "================================="
-echo "  wlan0  : $WLAN0_IP (ELRS backpack)"
-echo "  wlan2  : 10.10.10.1 (BirdDog AP)"
-echo "  Action : Connect Mission Planner to BirdDog AP → UDP 14550"
-echo "  Note   : MAVProxy starting now — ensure MP is listening"
+echo "  wlan0    : $WLAN0_IP (ELRS backpack)"
+echo "  wlan_ap  : 10.10.10.1 (BirdDog AP)"
+echo "  Action   : Connect Mission Planner to BirdDog AP → UDP 14550"
+echo "  Note     : MAVProxy starting now — ensure MP is listening"
 echo "================================="
 echo ""
 
-# MAVProxy — listens on wlan0 for backpack telemetry,
-# broadcasts to all devices on BirdDog AP subnet.
-# Started only after wlan0 has a confirmed real IP so the socket
-# binds to a live interface. Runs from /tmp for log write permission.
 MAVLINK_LOG="/opt/birddog/logs/mavlink.log"
 mkdir -p /opt/birddog/logs
 echo "--- MAVLink Bridge started $(date) ---" > "$MAVLINK_LOG"
@@ -1648,14 +1725,20 @@ case "$1" in
     verify)     exec sudo bash "$BIRDDOG_ROOT/common/verify_node.sh" ;;
     radios)
         echo "Radio layout:"
-        for IFACE in wlan0 wlan1 wlan2; do
+        for IFACE in wlan0 wlan_mesh_5 wlan_ap; do
             if ip link show "$IFACE" >/dev/null 2>&1; then
                 DRV=$(readlink /sys/class/net/$IFACE/device/driver 2>/dev/null | xargs basename 2>/dev/null || echo "unknown")
                 MODE=$(iw dev "$IFACE" info 2>/dev/null | awk '/type/ {print $2}' || echo "unknown")
                 STATE=$(ip link show "$IFACE" | grep -oP '(?<=state )\w+' || echo "unknown")
-                printf "  %-6s driver=%-12s mode=%-10s state=%s\n" "$IFACE" "$DRV" "$MODE" "$STATE"
+                printf "  %-14s driver=%-12s mode=%-10s state=%s\n" "$IFACE" "$DRV" "$MODE" "$STATE"
             fi
         done
+        # Show bat0 separately — virtual interface, not a physical radio
+        if ip link show bat0 >/dev/null 2>&1; then
+            BAT_IP=$(ip -4 addr show bat0 2>/dev/null | grep -oP '(?<=inet )[^/]+' | head -1)
+            PEERS=$(batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{count++} END{print count+0}')
+            printf "  %-14s batman-adv virtual interface — IP: %s  peers: %s\n" "bat0" "${BAT_IP:--}" "$PEERS"
+        fi
         ;;
     version)
         COMMIT=$(cat "$BIRDDOG_ROOT/version/COMMIT" 2>/dev/null || echo "unknown")
@@ -1680,8 +1763,8 @@ case "$1" in
         echo "================================="
         echo "  Role     : $ROLE"
         MESH_SVC=$(systemctl is-active birddog-mesh 2>/dev/null)
-        PEERS=$(iw dev wlan1 station dump 2>/dev/null | grep -c "^Station" | tr -d '[:space:]' || echo 0)
-        MESH_IP=$(ip -4 addr show wlan1 2>/dev/null | grep -oP "(?<=inet )[^/]+" | head -1)
+        PEERS=$(batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{count++} END{print count+0}')
+        MESH_IP=$(ip -4 addr show bat0 2>/dev/null | grep -oP "(?<=inet )[^/]+" | head -1)
         if [[ "$MESH_SVC" == "active" ]]; then
             echo "  Mesh     : joined (${PEERS} peers) — ${MESH_IP:-no IP}"
         else
@@ -1746,7 +1829,7 @@ case "$1" in
             echo "================================="
             echo "  SSID     : $ELRS_SSID"
             echo "  wlan0    : $WLAN0_IP (ELRS backpack)"
-            echo "  wlan2    : 10.10.10.1 (BirdDog AP)"
+            echo "  wlan_ap  : 10.10.10.1 (BirdDog AP)"
             echo "  MAVProxy : running"
             echo "  Log      : /opt/birddog/logs/mavlink.log"
             echo "================================="
