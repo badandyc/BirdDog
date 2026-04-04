@@ -103,10 +103,10 @@ remove_path "$BIRDDOG_ROOT/web"
 remove_path "$BIRDDOG_ROOT/bdc/bdc.conf"
 
 if [[ -d "$BIRDDOG_ROOT/mesh" ]]; then
+    # Clear all mesh runtime state — no stale installer scripts to preserve
     find "$BIRDDOG_ROOT/mesh" -mindepth 1 \
-        ! -name "add_mesh_network.sh" \
         -exec rm -rf {} + 2>/dev/null || true
-    echo "  mesh runtime cleared (installer preserved)"
+    echo "  mesh runtime cleared"
 fi
 
 mkdir -p "$BIRDDOG_ROOT"/{logs,web,mesh}
@@ -124,33 +124,12 @@ fi
 
 remove_path /etc/systemd/system/hostapd.service.d
 remove_path /etc/dnsmasq.conf
+
+# Remove any systemd-networkd interface configs written by bdm_AP_setup
+# (wlan_ap static IP). eth0 is managed by ifupdown — no restore needed.
 remove_path /etc/systemd/network
-
-# Restore eth0 DHCP so management access survives reboot
-mkdir -p /etc/systemd/network
-cat > /etc/systemd/network/10-eth0.network << 'EOF'
-[Match]
-Name=eth0
-
-[Network]
-DHCP=yes
-
-[DHCP]
-ClientIdentifier=mac
-SendHostname=yes
-EOF
-echo "  eth0 DHCP config restored"
-
-# Ensure systemd-networkd manages eth0 — stop NetworkManager so it
-# can't grab eth0 before networkd does
-systemctl stop NetworkManager 2>/dev/null || true
-systemctl disable NetworkManager 2>/dev/null || true
-systemctl enable systemd-networkd 2>/dev/null || true
-systemctl restart systemd-networkd 2>/dev/null || true
-sleep 2
-networkctl reconfigure eth0 2>/dev/null || true
-echo "  systemd-networkd enabled — NetworkManager disabled"
-echo "  eth0 reconfigured"
+networkctl reload 2>/dev/null || true
+echo "  systemd-networkd interface configs cleared"
 
 # -------------------------------------------------------
 # Step 5 — Reset hostname
@@ -189,7 +168,15 @@ echo "  avahi restarted"
 
 step "Resetting radio interfaces"
 
-for IFACE in wlan1 wlan2; do
+# Tear down batman-adv before touching wlan_mesh_5 — bat0 must be
+# detached cleanly or the interface reset will fail
+if ip link show bat0 >/dev/null 2>&1; then
+    ip link set bat0 down 2>/dev/null || true
+    batctl if del wlan_mesh_5 2>/dev/null || true
+    echo "  bat0 → torn down"
+fi
+
+for IFACE in wlan_mesh_5 wlan_ap; do
     if ip link show "$IFACE" >/dev/null 2>&1; then
         ip link set "$IFACE" down 2>/dev/null || true
         iw dev "$IFACE" set type managed 2>/dev/null || true
@@ -218,7 +205,7 @@ echo "  Hostname : $(hostname)"
 
 echo ""
 echo "  Radios:"
-for IFACE in wlan0 wlan1 wlan2; do
+for IFACE in wlan0 wlan_mesh_5 wlan_ap; do
     if ip link show "$IFACE" >/dev/null 2>&1; then
         DRIVER=$(ethtool -i "$IFACE" 2>/dev/null | awk '/driver:/{print $2}')
         STATE=$(ip link show "$IFACE" | awk '/state/{print $9}')
