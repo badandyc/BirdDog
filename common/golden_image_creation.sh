@@ -173,6 +173,12 @@ iface eth0 inet dhcp
 EOF
     echo "  /etc/network/interfaces written"
 
+    # Tell dhclient to identify itself by MAC address rather than hostname.
+    # This causes the router to issue the same DHCP lease across reboots
+    # as long as the Pi's MAC doesn't change — keeping the SSH IP stable.
+    echo 'send dhcp-client-identifier = hardware;' > /etc/dhcp/dhclient.conf
+    echo "  dhclient configured for MAC-based lease identity"
+
     # --------------------------------------------------
     echo "[Phase 1.4] Installing MAVProxy"
     # --------------------------------------------------
@@ -935,7 +941,7 @@ def mesh_has_peer():
             capture_output=True, text=True, timeout=3
         )
         lines = [l for l in result.stdout.splitlines()
-                 if l and not l.startswith("B.A.T") and not l.startswith("IF")]
+                 if l and not l.startswith("[B.A.T") and not l.startswith("IF")]
         return len(lines) > 0
     except Exception:
         return False
@@ -1130,6 +1136,7 @@ def main():
     global last_state_check
     os.makedirs(IPC_DIR, exist_ok=True)
     setup()
+    time.sleep(3)  # wait for hostname to settle before reading role
     boot_sequence()
     check_state()
     last_state_check = time.time()
