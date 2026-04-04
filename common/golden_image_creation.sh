@@ -1997,5 +1997,10 @@ if [[ "$BIRDDOG_MODE" == "full" ]]; then
     sleep 3
     reboot
 else
+    # Refresh mode — restart AP services to ensure clean state after
+    # script updates. Harmless on BDC nodes where these services
+    # are not running.
+    systemctl restart hostapd 2>/dev/null || true
+    systemctl restart dnsmasq 2>/dev/null || true
     echo "Next step: birddog configure"
 fi
