@@ -2058,10 +2058,9 @@ if [[ "$BIRDDOG_MODE" == "full" ]]; then
     echo "====================================="
     echo "Rebooting in 3 seconds..."
     echo "====================================="
-    # Release DHCP lease before reboot so the router clears the old
-    # hostname-based lease. On next boot dhclient uses MAC identity
-    # and gets a stable lease it will hold across subsequent reboots.
-    dhclient -r eth0 2>/dev/null || true
+    # Let the DHCP lease expire naturally — dhclient.conf is configured
+    # to use MAC-based identity so the router will issue the same lease
+    # on the next request without needing an explicit release.
     sleep 3
     reboot
 else
