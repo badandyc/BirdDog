@@ -81,17 +81,18 @@ if [[ -z "$BIRDDOG_MODE" ]]; then
     echo ""
 
     if [[ "$PRECHECK_PASS" -eq 1 ]]; then
-        echo "  [R] Re-install  (system verified — re-install not required)"
+        echo "  [F] Full install  (system verified — full re-install not required)"
     else
-        echo "  [R] Re-install"
+        echo "  [F] Full install  (packages, services, CLI — use on fresh image)"
         echo ""
-        echo "  System check — re-install recommended:"
+        echo "  System check — full install recommended:"
         for NOTE in "${PRECHECK_NOTES[@]}"; do
             echo "    • $NOTE"
         done
         echo ""
     fi
 
+    echo "  [S] Scripts + Services  (skip packages — reinstall services and CLI only)"
     echo "  [X] Exit"
     echo ""
     echo "  To refresh scripts only: birddog update"
@@ -100,9 +101,10 @@ if [[ -z "$BIRDDOG_MODE" ]]; then
     while true; do
         read -r -p "Choice: " MODE
         case "$MODE" in
-            R) BIRDDOG_MODE="full"    ; break ;;
+            F) BIRDDOG_MODE="full"    ; break ;;
+            S) BIRDDOG_MODE="scripts" ; break ;;
             X) echo "Exiting."; exit 0 ;;
-            *) echo "  Invalid — enter R or X" ;;
+            *) echo "  Invalid — enter F, S, or X" ;;
         esac
     done
 fi
@@ -779,7 +781,7 @@ date -u +"%Y-%m-%dT%H:%M:%SZ" > "$BUILD_FILE"
 # PERMS + CLI + DAEMON (full install only)
 # --------------------------------------------------
 
-if [[ "$BIRDDOG_MODE" == "full" ]]; then
+if [[ "$BIRDDOG_MODE" == "full" || "$BIRDDOG_MODE" == "scripts" ]]; then
 
 echo "[Phase 4] Permissions"
 
@@ -2040,7 +2042,7 @@ else
     echo "  WARNING: birddog_day service did not start — check: journalctl -u birddog_day"
 fi
 
-fi  # end full install only
+fi  # end full/scripts install
 
 # --------------------------------------------------
 # DONE
@@ -2072,10 +2074,22 @@ if [[ "$BIRDDOG_MODE" == "full" ]]; then
     # on the next request without needing an explicit release.
     sleep 3
     reboot
+elif [[ "$BIRDDOG_MODE" == "scripts" ]]; then
+    # Scripts + Services mode — restart all BirdDog services to pick up
+    # new scripts. AP services restarted for clean state.
+    # No reboot — node stays up and configured.
+    echo "  Restarting BirdDog services..."
+    systemctl restart birddog-mesh.service 2>/dev/null || true
+    systemctl restart birddog_day.service 2>/dev/null || true
+    systemctl restart hostapd 2>/dev/null || true
+    systemctl restart dnsmasq 2>/dev/null || true
+    systemctl restart mediamtx 2>/dev/null || true
+    systemctl restart nginx 2>/dev/null || true
+    echo "  Services restarted"
+    echo "Next step: birddog configure (if not already configured)"
 else
-    # Refresh mode — restart AP services to ensure clean state after
-    # script updates. Harmless on BDC nodes where these services
-    # are not running.
+    # Refresh mode (birddog update) — restart AP services only.
+    # Harmless on BDC nodes where these services are not running.
     systemctl restart hostapd 2>/dev/null || true
     systemctl restart dnsmasq 2>/dev/null || true
     echo "Next step: birddog configure"
