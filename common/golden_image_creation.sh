@@ -291,9 +291,11 @@ Before=network.target
 
 [Service]
 Type=oneshot
-# Block onboard wifi by subsystem — sdio is always the onboard brcmfmac.
-# USB adapters show as usb subsystem and are never blocked here.
-ExecStart=/bin/bash -c '    sleep 3;     for rf in /sys/class/rfkill/rfkill*/; do         subsystem=$(basename $(readlink $rf/device/device/subsystem 2>/dev/null) 2>/dev/null);         idx=$(cat $rf/index 2>/dev/null);         if [[ "$subsystem" == "sdio" && -n "$idx" ]]; then             echo 1 | tee "/sys/class/rfkill/rfkill${idx}/soft" >/dev/null 2>&1 || true;         fi;     done'
+# Block onboard brcmfmac (sdio) and explicitly unblock all USB radios.
+# USB adapters can come up soft-blocked by default when new devices are
+# added (rfkill indices shift), so we unblock all usb subsystem radios
+# unconditionally after blocking the onboard wifi.
+ExecStart=/bin/bash -c '    sleep 3;     for rf in /sys/class/rfkill/rfkill*/; do         subsystem=$(basename $(readlink $rf/device/device/subsystem 2>/dev/null) 2>/dev/null);         idx=$(cat $rf/index 2>/dev/null);         [[ -z "$idx" ]] && continue;         if [[ "$subsystem" == "sdio" ]]; then             echo 1 | tee "/sys/class/rfkill/rfkill${idx}/soft" >/dev/null 2>&1 || true;         elif [[ "$subsystem" == "usb" ]]; then             echo 0 | tee "/sys/class/rfkill/rfkill${idx}/soft" >/dev/null 2>&1 || true;         fi;     done'
 RemainAfterExit=yes
 
 [Install]
