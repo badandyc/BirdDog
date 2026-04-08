@@ -197,11 +197,13 @@ iface eth0 inet dhcp
 EOF
     echo "  /etc/network/interfaces written"
 
-    # Tell dhclient to identify itself by MAC address rather than hostname.
-    # This causes the router to issue the same DHCP lease across reboots
-    # as long as the Pi's MAC doesn't change — keeping the SSH IP stable.
-    echo 'send dhcp-client-identifier = hardware;' > /etc/dhcp/dhclient.conf
-    echo "  dhclient configured for MAC-based lease identity"
+    # Configure dhcpcd to use MAC address as DHCP client identifier.
+    # By default dhcpcd uses a DUID which can change, causing the router
+    # to assign a different IP on each fresh boot. Setting clientid forces
+    # dhcpcd to identify by MAC, giving a stable lease across reboots.
+    sed -i 's/^#clientid/clientid/' /etc/dhcpcd.conf
+    sed -i 's/^duid/#duid/' /etc/dhcpcd.conf
+    echo "  dhcpcd configured for MAC-based lease identity"
 
     # --------------------------------------------------
     echo "[Phase 1.4] Installing MAVProxy"
@@ -2058,7 +2060,7 @@ if [[ "$BIRDDOG_MODE" == "full" ]]; then
     echo "====================================="
     echo "Rebooting in 3 seconds..."
     echo "====================================="
-    # Let the DHCP lease expire naturally — dhclient.conf is configured
+    # Let the DHCP lease expire naturally — dhcpcd.conf is configured
     # to use MAC-based identity so the router will issue the same lease
     # on the next request without needing an explicit release.
     sleep 3
