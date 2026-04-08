@@ -41,6 +41,12 @@ if dpkg -s "network-manager" >/dev/null 2>&1; then
     PRECHECK_NOTES+=("network-manager present — must be purged")
 fi
 
+# unattended-upgrades must be absent — causes dpkg lock conflicts in the field
+if dpkg -s "unattended-upgrades" >/dev/null 2>&1; then
+    PRECHECK_PASS=0
+    PRECHECK_NOTES+=("unattended-upgrades present — must be purged")
+fi
+
 if [[ ! -f "$BIRDDOG_ROOT/mediamtx/mediamtx" ]]; then
     PRECHECK_PASS=0
     PRECHECK_NOTES+=("mediamtx binary missing")
@@ -132,6 +138,21 @@ if [[ "$BIRDDOG_MODE" == "full" ]]; then
     rm -f "$MAVLINK_CONF_PATH" 2>/dev/null || true
 
     echo "[Phase 0] Updating package index"
+
+    # Stop and disable apt background timers and unattended-upgrades.
+    # apt-daily.timer and apt-daily-upgrade.timer run apt in the background
+    # and hold the dpkg lock, causing install failures in the field.
+    systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
+    systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
+    systemctl stop apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+    systemctl stop unattended-upgrades 2>/dev/null || true
+    systemctl disable unattended-upgrades 2>/dev/null || true
+    pkill -f "unattended-upgrades" 2>/dev/null || true
+    sleep 2
+    # Release any stale dpkg locks left by background apt processes
+    rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/apt/archives/lock
+    dpkg --configure -a 2>/dev/null || true
+
     apt-get update
 
     # --------------------------------------------------
@@ -152,13 +173,14 @@ if [[ "$BIRDDOG_MODE" == "full" ]]; then
         install_pkg "$pkg"
     done
 
-    # Purge network-manager and rfkill — batman-adv mesh manages its own
-    # networking; NetworkManager conflicts with direct interface control.
-    # rfkill is removed because the block-onboard-wifi service uses the
-    # kernel sysfs rfkill interface directly, not the rfkill userspace tool.
+    # Purge network-manager, rfkill, and unattended-upgrades.
+    # network-manager conflicts with direct interface control.
+    # rfkill userspace tool replaced by sysfs writes.
+    # unattended-upgrades runs apt in the background and causes lock
+    # conflicts during field installs — must not be present on deployed nodes.
     echo ""
-    echo "  Purging network-manager and rfkill..."
-    apt-get purge -y network-manager rfkill 2>/dev/null || true
+    echo "  Purging network-manager, rfkill, unattended-upgrades..."
+    apt-get purge -y network-manager rfkill unattended-upgrades 2>/dev/null || true
     apt-get autoremove -y 2>/dev/null || true
     echo "  Done"
 
