@@ -266,11 +266,12 @@ EOF
     # wlan0        — brcmfmac onboard, blocked by birddog-block-onboard-wifi.service
     #                only unblocked temporarily for birddog mavlink (ELRS backpack)
     # wlan_mesh_5  — MT7612U (Comfast CF-WU782AC), 5 GHz batman-adv backbone
+    # wlan_mesh_24 — RT5370, 2.4 GHz batman-adv backbone (transitions wlan_mesh_5 to video)
     # wlan_ap      — RTL8192CU (Edimax), BDM access point + Mission Planner network
-    # wlan_mesh_24 — RT5370, reserved (no rule yet — hardware not yet on hand)
     cat > /etc/udev/rules.d/72-birddog-radios.rules <<'UDEV'
 SUBSYSTEM=="net", ACTION=="add", DRIVERS=="brcmfmac",  NAME="wlan0"
 SUBSYSTEM=="net", ACTION=="add", DRIVERS=="mt76x2u",   NAME="wlan_mesh_5"
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="rt2800usb", NAME="wlan_mesh_24"
 SUBSYSTEM=="net", ACTION=="add", DRIVERS=="rtl8192cu", NAME="wlan_ap"
 UDEV
 
