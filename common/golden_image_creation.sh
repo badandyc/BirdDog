@@ -323,10 +323,10 @@ LOG="/opt/birddog/mesh/mesh_runtime.log"
 resolve_peer() {
     local ORIG_MAC="$1"
     # Map originator MAC (wlan_mesh_5) → bat0 client MAC via translation table
-    # then bat0 client MAC → IP via ARP → hostname via avahi
+    # batctl tg fields: $1=* $2=clientMAC $3=VID $4=flags $5=( $6=ttvn) $7=originatorMAC
+    # Filter multicast MACs (33:33:*, 01:00:*, ff:*) — only unicast clients
     local CLIENT_MAC
-    CLIENT_MAC=$(batctl tg 2>/dev/null | awk -v orig="$ORIG_MAC" '
-        $NF == orig && $2 ~ /^[0-9]/ {print $1; exit}')
+    CLIENT_MAC=$(batctl tg 2>/dev/null | awk -v orig="$ORIG_MAC"         '$7==orig && $2!~/^33:33/ && $2!~/^01:00/ && $2!~/^ff:/ {print $2; exit}')
     local IP
     IP=$(ip neigh show dev "$BAT_IF" 2>/dev/null | awk -v mac="$CLIENT_MAC"         '$3==mac {print $1; exit}')
     if [[ -n "$IP" ]]; then
