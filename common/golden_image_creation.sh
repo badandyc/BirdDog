@@ -303,408 +303,6 @@ SVC
     systemctl enable birddog-block-onboard-wifi.service
     echo "  onboard WiFi block service installed and enabled"
 
-    # --------------------------------------------------
-    echo "[Phase 1.9] Installing Mesh CLI"
-    # --------------------------------------------------
-
-    # The mesh CLI uses batman-adv primitives (batctl) rather than 802.11s iw
-    # commands. bat0 is the virtual L3 interface batman-adv presents; all
-    # routing and peer queries go through it and batctl.
-    cat > /usr/local/bin/mesh <<'MESHCLI'
-#!/bin/bash
-# BirdDog Mesh CLI
-
-MESH_IF="wlan_mesh_5"
-BAT_IF="bat0"
-LOG="/opt/birddog/mesh/mesh_runtime.log"
-
-# --------------------------------------------------
-# HELPERS
-# --------------------------------------------------
-
-resolve_peer() {
-    local ORIG_MAC="$1"
-    # Probe known mesh IPs via ping — find which IP routes via this originator.
-    # MAC-based approaches fail because bat0 MACs are randomly generated on boot.
-    # Ping stimulates ARP, then we check the translation table to confirm which
-    # originator owns that bat0 client MAC.
-    local BASE="10.10.20"
-    for i in 1 2 3 4 5 10 20 30 40 50 60 70 80 90 100; do
-        local TARGET="${BASE}.${i}"
-        ping -c1 -W1 -I "$BAT_IF" "$TARGET" >/dev/null 2>&1 || continue
-        local ARP_MAC
-        ARP_MAC=$(ip neigh show dev "$BAT_IF" 2>/dev/null | awk -v ip="$TARGET" '$1==ip {print $3; exit}')
-        [[ -z "$ARP_MAC" ]] && continue
-        local VIA
-        VIA=$(batctl tg 2>/dev/null | awk -v mac="$ARP_MAC" '$2==mac {print $7; exit}')
-        if [[ "$VIA" == "$ORIG_MAC" ]]; then
-            local HOST
-            HOST=$(avahi-resolve-address "$TARGET" 2>/dev/null | awk '{print $2}' | sed 's/\.local//')
-            [[ -n "$HOST" ]] && echo "$HOST" && return
-            echo "$TARGET"
-            return
-        fi
-    done
-    echo "$ORIG_MAC"
-}
-
-mesh_joined() {
-    # batman-adv is active when bat0 exists and wlan_mesh_5 is listed
-    # as a batman-adv interface via batctl
-    ip link show "$BAT_IF" >/dev/null 2>&1 && \
-        batctl if 2>/dev/null | grep -q "$MESH_IF"
-}
-
-mesh_ip() {
-    ip -4 addr show "$BAT_IF" 2>/dev/null | grep -oP '(?<=inet )[^/]+'
-}
-
-peer_macs() {
-    # Direct (1-hop) batman-adv neighbors
-    batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{print $2}' | sort -u
-}
-
-peer_ip() {
-    # Same ping/ARP/tg chain as resolve_peer() but returns IP instead of hostname
-    local ORIG_MAC="$1"
-    local BASE="10.10.20"
-    for i in 1 2 3 4 5 10 20 30 40 50 60 70 80 90 100; do
-        local TARGET="${BASE}.${i}"
-        ping -c1 -W1 -I "$BAT_IF" "$TARGET" >/dev/null 2>&1 || continue
-        local ARP_MAC
-        ARP_MAC=$(ip neigh show dev "$BAT_IF" 2>/dev/null | awk -v ip="$TARGET" '$1==ip {print $3; exit}')
-        [[ -z "$ARP_MAC" ]] && continue
-        local VIA
-        VIA=$(batctl tg 2>/dev/null | awk -v mac="$ARP_MAC" '$2==mac {print $7; exit}')
-        if [[ "$VIA" == "$ORIG_MAC" ]]; then
-            echo "$TARGET"
-            return
-        fi
-    done
-}
-
-peer_tq() {
-    # TQ = Transmission Quality (0-255) from batman-adv originator table
-    local ORIG_MAC="$1"
-    batctl o 2>/dev/null | awk -v mac="$ORIG_MAC"         '$1=="*" && $2==mac {gsub(/[()]/,"",$4); print $4; exit}'
-}
-
-service_state() {
-    systemctl is-active birddog-mesh 2>/dev/null
-}
-
-stream_state() {
-    systemctl is-active birddog-stream 2>/dev/null
-}
-
-# --------------------------------------------------
-# STATUS
-# --------------------------------------------------
-
-cmd_status() {
-    echo "================================="
-    echo "BirdDog Mesh Status"
-    echo "  Node : $(hostname)"
-    echo "  Time : $(date '+%Y-%m-%d %H:%M:%S')"
-    echo "================================="
-    echo ""
-
-    echo "  Mesh service   : $(service_state)"
-
-    if ! mesh_joined; then
-        echo "  Interface      : NOT in mesh (batman-adv not active)"
-        echo ""
-        echo "  Run: birddog verify  for full diagnostics"
-        echo ""
-        return
-    fi
-
-    local IP PEERS
-    IP=$(mesh_ip)
-    PEERS=$(peer_macs | wc -l)
-
-    echo "  Interface      : wlan_mesh_5 → bat0 (batman-adv)"
-    echo "  Mesh IP        : ${IP:-unassigned}"
-    echo "  Direct peers   : $PEERS"
-
-    if [[ -f /opt/birddog/bdc/bdc.conf ]]; then
-        echo "  Stream service : $(stream_state)"
-        local STREAM
-        STREAM=$(grep -oP '(?<=STREAM_NAME=).+' /opt/birddog/bdc/bdc.conf 2>/dev/null || true)
-        [[ -n "$STREAM" ]] && echo "  Stream name    : $STREAM"
-    fi
-
-    echo ""
-
-    if [[ "$PEERS" -gt 0 ]]; then
-        printf "  %-14s %-16s %-10s %-10s\n" "Peer" "IP" "TQ" "Last seen"
-        printf "  %s\n" "---------------------------------------------------"
-        while IFS= read -r MAC; do
-            local HOST PEER_IP TQ LASTSEEN
-            HOST=$(resolve_peer "$MAC")
-            PEER_IP=$(peer_ip "$MAC")
-            TQ=$(peer_tq "$MAC")
-            LASTSEEN=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$2==mac {print $3; exit}')
-            printf "  %-14s %-16s %-10s %-10s\n" \
-                "${HOST:-$MAC}" "${PEER_IP:--}" "${TQ:--}" "${LASTSEEN:--}"
-        done < <(peer_macs)
-        echo ""
-    fi
-}
-
-# --------------------------------------------------
-# PEERS
-# --------------------------------------------------
-
-cmd_peers() {
-    echo "================================="
-    echo "BirdDog Mesh Peers"
-    echo "================================="
-
-    if ! mesh_joined; then
-        echo "  Not in mesh (batman-adv not active)"
-        return
-    fi
-
-    local COUNT=0
-    while IFS= read -r MAC; do
-        COUNT=$((COUNT+1))
-        local HOST PEER_IP TQ LASTSEEN
-        HOST=$(resolve_peer "$MAC")
-        PEER_IP=$(peer_ip "$MAC")
-        TQ=$(peer_tq "$MAC")
-        LASTSEEN=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$2==mac {print $3; exit}')
-
-        echo ""
-        echo "  Peer     : ${HOST:-unknown}"
-        echo "  MAC      : $MAC"
-        echo "  IP       : ${PEER_IP:--}"
-        echo "  TQ       : ${TQ:--}  (Transmission Quality 0-255)"
-        echo "  Last seen: ${LASTSEEN:--}"
-    done < <(peer_macs)
-
-    [[ "$COUNT" -eq 0 ]] && echo "" && echo "  No peers currently visible"
-    echo ""
-}
-
-# --------------------------------------------------
-# MAP
-# --------------------------------------------------
-
-cmd_map() {
-    echo "================================="
-    echo "BirdDog Mesh Topology"
-    echo "================================="
-
-    if ! mesh_joined; then
-        echo "  Not in mesh (batman-adv not active)"
-        return
-    fi
-
-    local SELF IP
-    SELF=$(hostname)
-    IP=$(mesh_ip)
-
-    echo ""
-    echo "  Self: $SELF ($IP)"
-    echo ""
-    echo "  Direct links:"
-
-    local COUNT=0
-    while IFS= read -r MAC; do
-        COUNT=$((COUNT+1))
-        local HOST TQ
-        HOST=$(resolve_peer "$MAC")
-        TQ=$(peer_tq "$MAC")
-        echo "    $SELF  <--[TQ:${TQ:--}]-->  $HOST"
-    done < <(peer_macs)
-
-    [[ "$COUNT" -eq 0 ]] && echo "    (no direct peers)"
-
-    echo ""
-    echo "  Mesh routes (batman-adv originators):"
-    local ROUTES=0
-    while IFS= read -r line; do
-        [[ "$line" =~ ^[0-9a-f]{2}: ]] || continue
-        ROUTES=$((ROUTES+1))
-        local DEST NEXTHOP
-        DEST=$(echo "$line" | awk '{print $1}')
-        NEXTHOP=$(echo "$line" | awk '{print $3}')
-        local DEST_HOST NEXT_HOST
-        DEST_HOST=$(resolve_peer "$DEST")
-        NEXT_HOST=$(resolve_peer "$NEXTHOP")
-        echo "    ${DEST_HOST:-$DEST}  →  via ${NEXT_HOST:-$NEXTHOP}"
-    done < <(batctl o 2>/dev/null)
-
-    [[ "$ROUTES" -eq 0 ]] && echo "    (no originators yet)"
-    echo ""
-}
-
-# --------------------------------------------------
-# GRAPH
-# --------------------------------------------------
-
-cmd_graph() {
-    echo "================================="
-    echo "BirdDog Mesh Graph"
-    echo "================================="
-
-    if ! mesh_joined; then
-        echo "  Not in mesh (batman-adv not active)"
-        return
-    fi
-
-    local SELF IP PEERS
-    SELF=$(hostname)
-    IP=$(mesh_ip)
-    PEERS=$(peer_macs | wc -l)
-
-    echo ""
-    echo "  $SELF ($IP)"
-
-    local i=0
-    while IFS= read -r MAC; do
-        i=$((i+1))
-        local HOST TQ
-        HOST=$(resolve_peer "$MAC")
-        TQ=$(peer_tq "$MAC")
-        if [[ "$i" -eq "$PEERS" ]]; then
-            echo "  └── $HOST  (TQ:${TQ:--})"
-        else
-            echo "  ├── $HOST  (TQ:${TQ:--})"
-        fi
-    done < <(peer_macs)
-
-    [[ "$PEERS" -eq 0 ]] && echo "  └── (no peers)"
-    echo ""
-}
-
-# --------------------------------------------------
-# LOG
-# --------------------------------------------------
-
-cmd_log() {
-    local LINES="${1:-30}"
-    if [[ -f "$LOG" ]]; then
-        echo "=== Mesh Runtime Log (last $LINES lines) ==="
-        echo ""
-        tail -n "$LINES" "$LOG"
-        echo ""
-    else
-        echo "  Log not found: $LOG"
-    fi
-}
-
-# --------------------------------------------------
-# WATCH
-# --------------------------------------------------
-
-cmd_watch() {
-    local INTERVAL="${1:-5}"
-    echo "  Watching mesh — refresh every ${INTERVAL}s  (Ctrl+C to stop)"
-    echo ""
-    while true; do
-        clear
-        cmd_status
-        sleep "$INTERVAL"
-    done
-}
-
-# --------------------------------------------------
-# PING
-# --------------------------------------------------
-
-cmd_ping() {
-    echo "================================="
-    echo "BirdDog Mesh Ping"
-    echo "================================="
-    echo ""
-
-    if ! mesh_joined; then
-        echo "  Not in mesh (batman-adv not active)"
-        return
-    fi
-
-    local COUNT=0
-    local BASE
-    BASE=$(mesh_ip | grep -oP '^\d+\.\d+\.\d+')
-
-    for i in 10 20 30 40 50; do
-        local TARGET="${BASE}.${i}"
-        local SELF_IP
-        SELF_IP=$(mesh_ip)
-        [[ "$TARGET" == "$SELF_IP" ]] && continue
-        if ping -c1 -W1 -I "$BAT_IF" "$TARGET" >/dev/null 2>&1; then
-            local HOST
-            HOST=$(avahi-resolve-address "$TARGET" 2>/dev/null | awk '{print $2}' | sed 's/\.local//')
-            echo "  $TARGET  ${HOST:+($HOST)}  REACHABLE"
-            COUNT=$((COUNT+1))
-        fi
-    done
-
-    [[ "$COUNT" -eq 0 ]] && echo "  No mesh nodes reachable"
-    echo ""
-}
-
-# --------------------------------------------------
-# ORIGINATORS
-# --------------------------------------------------
-
-cmd_originators() {
-    echo "================================="
-    echo "BirdDog batman-adv Originators"
-    echo "================================="
-    echo ""
-    if ! mesh_joined; then
-        echo "  Not in mesh (batman-adv not active)"
-        return
-    fi
-    batctl o 2>/dev/null || echo "  (no originator table yet)"
-    echo ""
-}
-
-# --------------------------------------------------
-# DISPATCH
-# --------------------------------------------------
-
-case "$1" in
-    status)      cmd_status ;;
-    peers)       cmd_peers ;;
-    map)         cmd_map ;;
-    graph)       cmd_graph ;;
-    log)         cmd_log "${2:-30}" ;;
-    watch)       cmd_watch "${2:-5}" ;;
-    ping)        cmd_ping ;;
-    originators) cmd_originators ;;
-    ""  | help)
-        echo ""
-        echo "================================="
-        echo "BirdDog Mesh CLI"
-        echo "================================="
-        echo ""
-        echo "  mesh status        mesh health + peer table"
-        echo "  mesh peers         detailed batman-adv metrics per peer"
-        echo "  mesh map           direct links + originator routes"
-        echo "  mesh graph         topology tree"
-        echo "  mesh log [N]       last N lines of runtime log (default 30)"
-        echo "  mesh watch [N]     live status refresh every N seconds (default 5)"
-        echo "  mesh ping          ping all expected mesh nodes"
-        echo "  mesh originators   raw batman-adv originator table"
-        echo "  mesh help          this menu"
-        echo ""
-        echo "================================="
-        echo ""
-        ;;
-    *)
-        echo "Unknown command: $1"
-        echo "Run 'mesh help' for usage"
-        exit 1
-        ;;
-esac
-MESHCLI
-
-    chmod +x /usr/local/bin/mesh
-    echo "  Mesh CLI installed → /usr/local/bin/mesh"
 
 fi  # end full install
 
@@ -820,6 +418,410 @@ shopt -u nullglob
 # CLI + DAEMON
 # --------------------------------------------------
 
+# --------------------------------------------------
+echo "[Phase 1.9] Installing Mesh CLI"
+# --------------------------------------------------
+
+# The mesh CLI uses batman-adv primitives (batctl) rather than 802.11s iw
+# commands. bat0 is the virtual L3 interface batman-adv presents; all
+# routing and peer queries go through it and batctl.
+cat > /usr/local/bin/mesh <<'MESHCLI'
+#!/bin/bash
+# BirdDog Mesh CLI
+
+MESH_IF="wlan_mesh_5"
+BAT_IF="bat0"
+LOG="/opt/birddog/mesh/mesh_runtime.log"
+
+# --------------------------------------------------
+# HELPERS
+# --------------------------------------------------
+
+resolve_peer() {
+local ORIG_MAC="$1"
+# Probe known mesh IPs via ping — find which IP routes via this originator.
+# MAC-based approaches fail because bat0 MACs are randomly generated on boot.
+# Ping stimulates ARP, then we check the translation table to confirm which
+# originator owns that bat0 client MAC.
+local BASE="10.10.20"
+for i in 1 2 3 4 5 10 20 30 40 50 60 70 80 90 100; do
+    local TARGET="${BASE}.${i}"
+    ping -c1 -W1 -I "$BAT_IF" "$TARGET" >/dev/null 2>&1 || continue
+    local ARP_MAC
+    ARP_MAC=$(ip neigh show dev "$BAT_IF" 2>/dev/null | awk -v ip="$TARGET" '$1==ip {print $3; exit}')
+    [[ -z "$ARP_MAC" ]] && continue
+    local VIA
+    VIA=$(batctl tg 2>/dev/null | awk -v mac="$ARP_MAC" '$2==mac {print $7; exit}')
+    if [[ "$VIA" == "$ORIG_MAC" ]]; then
+        local HOST
+        HOST=$(avahi-resolve-address "$TARGET" 2>/dev/null | awk '{print $2}' | sed 's/\.local//')
+        [[ -n "$HOST" ]] && echo "$HOST" && return
+        echo "$TARGET"
+        return
+    fi
+done
+echo "$ORIG_MAC"
+}
+
+mesh_joined() {
+# batman-adv is active when bat0 exists and wlan_mesh_5 is listed
+# as a batman-adv interface via batctl
+ip link show "$BAT_IF" >/dev/null 2>&1 && \
+    batctl if 2>/dev/null | grep -q "$MESH_IF"
+}
+
+mesh_ip() {
+ip -4 addr show "$BAT_IF" 2>/dev/null | grep -oP '(?<=inet )[^/]+'
+}
+
+peer_macs() {
+# Direct (1-hop) batman-adv neighbors
+batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{print $2}' | sort -u
+}
+
+peer_ip() {
+# Same ping/ARP/tg chain as resolve_peer() but returns IP instead of hostname
+local ORIG_MAC="$1"
+local BASE="10.10.20"
+for i in 1 2 3 4 5 10 20 30 40 50 60 70 80 90 100; do
+    local TARGET="${BASE}.${i}"
+    ping -c1 -W1 -I "$BAT_IF" "$TARGET" >/dev/null 2>&1 || continue
+    local ARP_MAC
+    ARP_MAC=$(ip neigh show dev "$BAT_IF" 2>/dev/null | awk -v ip="$TARGET" '$1==ip {print $3; exit}')
+    [[ -z "$ARP_MAC" ]] && continue
+    local VIA
+    VIA=$(batctl tg 2>/dev/null | awk -v mac="$ARP_MAC" '$2==mac {print $7; exit}')
+    if [[ "$VIA" == "$ORIG_MAC" ]]; then
+        echo "$TARGET"
+        return
+    fi
+done
+}
+
+peer_tq() {
+# TQ = Transmission Quality (0-255) from batman-adv originator table
+local ORIG_MAC="$1"
+batctl o 2>/dev/null | awk -v mac="$ORIG_MAC"         '$1=="*" && $2==mac {gsub(/[()]/,"",$4); print $4; exit}'
+}
+
+service_state() {
+systemctl is-active birddog-mesh 2>/dev/null
+}
+
+stream_state() {
+systemctl is-active birddog-stream 2>/dev/null
+}
+
+# --------------------------------------------------
+# STATUS
+# --------------------------------------------------
+
+cmd_status() {
+echo "================================="
+echo "BirdDog Mesh Status"
+echo "  Node : $(hostname)"
+echo "  Time : $(date '+%Y-%m-%d %H:%M:%S')"
+echo "================================="
+echo ""
+
+echo "  Mesh service   : $(service_state)"
+
+if ! mesh_joined; then
+    echo "  Interface      : NOT in mesh (batman-adv not active)"
+    echo ""
+    echo "  Run: birddog verify  for full diagnostics"
+    echo ""
+    return
+fi
+
+local IP PEERS
+IP=$(mesh_ip)
+PEERS=$(peer_macs | wc -l)
+
+echo "  Interface      : wlan_mesh_5 → bat0 (batman-adv)"
+echo "  Mesh IP        : ${IP:-unassigned}"
+echo "  Direct peers   : $PEERS"
+
+if [[ -f /opt/birddog/bdc/bdc.conf ]]; then
+    echo "  Stream service : $(stream_state)"
+    local STREAM
+    STREAM=$(grep -oP '(?<=STREAM_NAME=).+' /opt/birddog/bdc/bdc.conf 2>/dev/null || true)
+    [[ -n "$STREAM" ]] && echo "  Stream name    : $STREAM"
+fi
+
+echo ""
+
+if [[ "$PEERS" -gt 0 ]]; then
+    printf "  %-14s %-16s %-10s %-10s\n" "Peer" "IP" "TQ" "Last seen"
+    printf "  %s\n" "---------------------------------------------------"
+    while IFS= read -r MAC; do
+        local HOST PEER_IP TQ LASTSEEN
+        HOST=$(resolve_peer "$MAC")
+        PEER_IP=$(peer_ip "$MAC")
+        TQ=$(peer_tq "$MAC")
+        LASTSEEN=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$2==mac {print $3; exit}')
+        printf "  %-14s %-16s %-10s %-10s\n" \
+            "${HOST:-$MAC}" "${PEER_IP:--}" "${TQ:--}" "${LASTSEEN:--}"
+    done < <(peer_macs)
+    echo ""
+fi
+}
+
+# --------------------------------------------------
+# PEERS
+# --------------------------------------------------
+
+cmd_peers() {
+echo "================================="
+echo "BirdDog Mesh Peers"
+echo "================================="
+
+if ! mesh_joined; then
+    echo "  Not in mesh (batman-adv not active)"
+    return
+fi
+
+local COUNT=0
+while IFS= read -r MAC; do
+    COUNT=$((COUNT+1))
+    local HOST PEER_IP TQ LASTSEEN
+    HOST=$(resolve_peer "$MAC")
+    PEER_IP=$(peer_ip "$MAC")
+    TQ=$(peer_tq "$MAC")
+    LASTSEEN=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$2==mac {print $3; exit}')
+
+    echo ""
+    echo "  Peer     : ${HOST:-unknown}"
+    echo "  MAC      : $MAC"
+    echo "  IP       : ${PEER_IP:--}"
+    echo "  TQ       : ${TQ:--}  (Transmission Quality 0-255)"
+    echo "  Last seen: ${LASTSEEN:--}"
+done < <(peer_macs)
+
+[[ "$COUNT" -eq 0 ]] && echo "" && echo "  No peers currently visible"
+echo ""
+}
+
+# --------------------------------------------------
+# MAP
+# --------------------------------------------------
+
+cmd_map() {
+echo "================================="
+echo "BirdDog Mesh Topology"
+echo "================================="
+
+if ! mesh_joined; then
+    echo "  Not in mesh (batman-adv not active)"
+    return
+fi
+
+local SELF IP
+SELF=$(hostname)
+IP=$(mesh_ip)
+
+echo ""
+echo "  Self: $SELF ($IP)"
+echo ""
+echo "  Direct links:"
+
+local COUNT=0
+while IFS= read -r MAC; do
+    COUNT=$((COUNT+1))
+    local HOST TQ
+    HOST=$(resolve_peer "$MAC")
+    TQ=$(peer_tq "$MAC")
+    echo "    $SELF  <--[TQ:${TQ:--}]-->  $HOST"
+done < <(peer_macs)
+
+[[ "$COUNT" -eq 0 ]] && echo "    (no direct peers)"
+
+echo ""
+echo "  Mesh routes (batman-adv originators):"
+local ROUTES=0
+while IFS= read -r line; do
+    [[ "$line" =~ ^[0-9a-f]{2}: ]] || continue
+    ROUTES=$((ROUTES+1))
+    local DEST NEXTHOP
+    DEST=$(echo "$line" | awk '{print $1}')
+    NEXTHOP=$(echo "$line" | awk '{print $3}')
+    local DEST_HOST NEXT_HOST
+    DEST_HOST=$(resolve_peer "$DEST")
+    NEXT_HOST=$(resolve_peer "$NEXTHOP")
+    echo "    ${DEST_HOST:-$DEST}  →  via ${NEXT_HOST:-$NEXTHOP}"
+done < <(batctl o 2>/dev/null)
+
+[[ "$ROUTES" -eq 0 ]] && echo "    (no originators yet)"
+echo ""
+}
+
+# --------------------------------------------------
+# GRAPH
+# --------------------------------------------------
+
+cmd_graph() {
+echo "================================="
+echo "BirdDog Mesh Graph"
+echo "================================="
+
+if ! mesh_joined; then
+    echo "  Not in mesh (batman-adv not active)"
+    return
+fi
+
+local SELF IP PEERS
+SELF=$(hostname)
+IP=$(mesh_ip)
+PEERS=$(peer_macs | wc -l)
+
+echo ""
+echo "  $SELF ($IP)"
+
+local i=0
+while IFS= read -r MAC; do
+    i=$((i+1))
+    local HOST TQ
+    HOST=$(resolve_peer "$MAC")
+    TQ=$(peer_tq "$MAC")
+    if [[ "$i" -eq "$PEERS" ]]; then
+        echo "  └── $HOST  (TQ:${TQ:--})"
+    else
+        echo "  ├── $HOST  (TQ:${TQ:--})"
+    fi
+done < <(peer_macs)
+
+[[ "$PEERS" -eq 0 ]] && echo "  └── (no peers)"
+echo ""
+}
+
+# --------------------------------------------------
+# LOG
+# --------------------------------------------------
+
+cmd_log() {
+local LINES="${1:-30}"
+if [[ -f "$LOG" ]]; then
+    echo "=== Mesh Runtime Log (last $LINES lines) ==="
+    echo ""
+    tail -n "$LINES" "$LOG"
+    echo ""
+else
+    echo "  Log not found: $LOG"
+fi
+}
+
+# --------------------------------------------------
+# WATCH
+# --------------------------------------------------
+
+cmd_watch() {
+local INTERVAL="${1:-5}"
+echo "  Watching mesh — refresh every ${INTERVAL}s  (Ctrl+C to stop)"
+echo ""
+while true; do
+    clear
+    cmd_status
+    sleep "$INTERVAL"
+done
+}
+
+# --------------------------------------------------
+# PING
+# --------------------------------------------------
+
+cmd_ping() {
+echo "================================="
+echo "BirdDog Mesh Ping"
+echo "================================="
+echo ""
+
+if ! mesh_joined; then
+    echo "  Not in mesh (batman-adv not active)"
+    return
+fi
+
+local COUNT=0
+local BASE
+BASE=$(mesh_ip | grep -oP '^\d+\.\d+\.\d+')
+
+for i in 10 20 30 40 50; do
+    local TARGET="${BASE}.${i}"
+    local SELF_IP
+    SELF_IP=$(mesh_ip)
+    [[ "$TARGET" == "$SELF_IP" ]] && continue
+    if ping -c1 -W1 -I "$BAT_IF" "$TARGET" >/dev/null 2>&1; then
+        local HOST
+        HOST=$(avahi-resolve-address "$TARGET" 2>/dev/null | awk '{print $2}' | sed 's/\.local//')
+        echo "  $TARGET  ${HOST:+($HOST)}  REACHABLE"
+        COUNT=$((COUNT+1))
+    fi
+done
+
+[[ "$COUNT" -eq 0 ]] && echo "  No mesh nodes reachable"
+echo ""
+}
+
+# --------------------------------------------------
+# ORIGINATORS
+# --------------------------------------------------
+
+cmd_originators() {
+echo "================================="
+echo "BirdDog batman-adv Originators"
+echo "================================="
+echo ""
+if ! mesh_joined; then
+    echo "  Not in mesh (batman-adv not active)"
+    return
+fi
+batctl o 2>/dev/null || echo "  (no originator table yet)"
+echo ""
+}
+
+# --------------------------------------------------
+# DISPATCH
+# --------------------------------------------------
+
+case "$1" in
+status)      cmd_status ;;
+peers)       cmd_peers ;;
+map)         cmd_map ;;
+graph)       cmd_graph ;;
+log)         cmd_log "${2:-30}" ;;
+watch)       cmd_watch "${2:-5}" ;;
+ping)        cmd_ping ;;
+originators) cmd_originators ;;
+""  | help)
+    echo ""
+    echo "================================="
+    echo "BirdDog Mesh CLI"
+    echo "================================="
+    echo ""
+    echo "  mesh status        mesh health + peer table"
+    echo "  mesh peers         detailed batman-adv metrics per peer"
+    echo "  mesh map           direct links + originator routes"
+    echo "  mesh graph         topology tree"
+    echo "  mesh log [N]       last N lines of runtime log (default 30)"
+    echo "  mesh watch [N]     live status refresh every N seconds (default 5)"
+    echo "  mesh ping          ping all expected mesh nodes"
+    echo "  mesh originators   raw batman-adv originator table"
+    echo "  mesh help          this menu"
+    echo ""
+    echo "================================="
+    echo ""
+    ;;
+*)
+    echo "Unknown command: $1"
+    echo "Run 'mesh help' for usage"
+    exit 1
+    ;;
+esac
+MESHCLI
+
+chmod +x /usr/local/bin/mesh
+echo "  Mesh CLI installed → /usr/local/bin/mesh"
+
+# --------------------------------------------------
 echo "[Phase 5] Installing BirdDog CLI and birddog_day daemon"
 
 # ── birddog_day.py ──
