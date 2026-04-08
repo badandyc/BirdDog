@@ -322,20 +322,27 @@ LOG="/opt/birddog/mesh/mesh_runtime.log"
 
 resolve_peer() {
     local ORIG_MAC="$1"
-    # Map originator MAC (wlan_mesh_5) → bat0 client MAC via translation table
-    # batctl tg fields: $1=* $2=clientMAC $3=VID $4=flags $5=( $6=ttvn) $7=originatorMAC
-    # Filter multicast MACs (33:33:*, 01:00:*, ff:*) — only unicast clients
-    local CLIENT_MAC
-    CLIENT_MAC=$(batctl tg 2>/dev/null | awk -v orig="$ORIG_MAC"         '$7==orig && $2!~/^33:33/ && $2!~/^01:00/ && $2!~/^ff:/ {print $2; exit}')
-    local IP
-    IP=$(ip neigh show dev "$BAT_IF" 2>/dev/null | awk -v mac="$CLIENT_MAC"         '$3==mac {print $1; exit}')
-    if [[ -n "$IP" ]]; then
-        local HOST
-        HOST=$(avahi-resolve-address "$IP" 2>/dev/null | awk '{print $2}' | sed 's/\.local//')
-        [[ -n "$HOST" ]] && echo "$HOST" && return
-        echo "$IP"
-        return
-    fi
+    # Probe known mesh IPs via ping — find which IP routes via this originator.
+    # MAC-based approaches fail because bat0 MACs are randomly generated on boot.
+    # Ping stimulates ARP, then we check the translation table to confirm which
+    # originator owns that bat0 client MAC.
+    local BASE="10.10.20"
+    for i in 1 2 3 4 5 10 20 30 40 50 60 70 80 90 100; do
+        local TARGET="${BASE}.${i}"
+        ping -c1 -W1 -I "$BAT_IF" "$TARGET" >/dev/null 2>&1 || continue
+        local ARP_MAC
+        ARP_MAC=$(ip neigh show dev "$BAT_IF" 2>/dev/null | awk -v ip="$TARGET" '$1==ip {print $3; exit}')
+        [[ -z "$ARP_MAC" ]] && continue
+        local VIA
+        VIA=$(batctl tg 2>/dev/null | awk -v mac="$ARP_MAC" '$2==mac {print $7; exit}')
+        if [[ "$VIA" == "$ORIG_MAC" ]]; then
+            local HOST
+            HOST=$(avahi-resolve-address "$TARGET" 2>/dev/null | awk '{print $2}' | sed 's/\.local//')
+            [[ -n "$HOST" ]] && echo "$HOST" && return
+            echo "$TARGET"
+            return
+        fi
+    done
     echo "$ORIG_MAC"
 }
 
