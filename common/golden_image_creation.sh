@@ -364,6 +364,31 @@ peer_macs() {
     batctl neighbors 2>/dev/null | awk 'NR>2 && /[0-9a-f:]/{print $2}' | sort -u
 }
 
+peer_ip() {
+    # Same ping/ARP/tg chain as resolve_peer() but returns IP instead of hostname
+    local ORIG_MAC="$1"
+    local BASE="10.10.20"
+    for i in 1 2 3 4 5 10 20 30 40 50 60 70 80 90 100; do
+        local TARGET="${BASE}.${i}"
+        ping -c1 -W1 -I "$BAT_IF" "$TARGET" >/dev/null 2>&1 || continue
+        local ARP_MAC
+        ARP_MAC=$(ip neigh show dev "$BAT_IF" 2>/dev/null | awk -v ip="$TARGET" '$1==ip {print $3; exit}')
+        [[ -z "$ARP_MAC" ]] && continue
+        local VIA
+        VIA=$(batctl tg 2>/dev/null | awk -v mac="$ARP_MAC" '$2==mac {print $7; exit}')
+        if [[ "$VIA" == "$ORIG_MAC" ]]; then
+            echo "$TARGET"
+            return
+        fi
+    done
+}
+
+peer_tq() {
+    # TQ = Transmission Quality (0-255) from batman-adv originator table
+    local ORIG_MAC="$1"
+    batctl o 2>/dev/null | awk -v mac="$ORIG_MAC"         '$1=="*" && $2==mac {gsub(/[()]/,"",$4); print $4; exit}'
+}
+
 service_state() {
     systemctl is-active birddog-mesh 2>/dev/null
 }
@@ -417,9 +442,8 @@ cmd_status() {
         while IFS= read -r MAC; do
             local HOST PEER_IP TQ LASTSEEN
             HOST=$(resolve_peer "$MAC")
-            PEER_IP=$(ip neigh show dev "$BAT_IF" 2>/dev/null | grep "$MAC" | awk '{print $1}' | head -n1)
-            # TQ = Transmission Quality, batman-adv metric (0-255, higher=better)
-            TQ=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$2==mac {print $4; exit}')
+            PEER_IP=$(peer_ip "$MAC")
+            TQ=$(peer_tq "$MAC")
             LASTSEEN=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$2==mac {print $3; exit}')
             printf "  %-14s %-16s %-10s %-10s\n" \
                 "${HOST:-$MAC}" "${PEER_IP:--}" "${TQ:--}" "${LASTSEEN:--}"
@@ -447,8 +471,8 @@ cmd_peers() {
         COUNT=$((COUNT+1))
         local HOST PEER_IP TQ LASTSEEN
         HOST=$(resolve_peer "$MAC")
-        PEER_IP=$(ip neigh show dev "$BAT_IF" 2>/dev/null | grep "$MAC" | awk '{print $1}' | head -n1)
-        TQ=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$2==mac {print $4; exit}')
+        PEER_IP=$(peer_ip "$MAC")
+        TQ=$(peer_tq "$MAC")
         LASTSEEN=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$2==mac {print $3; exit}')
 
         echo ""
@@ -491,7 +515,7 @@ cmd_map() {
         COUNT=$((COUNT+1))
         local HOST TQ
         HOST=$(resolve_peer "$MAC")
-        TQ=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$2==mac {print $4; exit}')
+        TQ=$(peer_tq "$MAC")
         echo "    $SELF  <--[TQ:${TQ:--}]-->  $HOST"
     done < <(peer_macs)
 
@@ -543,7 +567,7 @@ cmd_graph() {
         i=$((i+1))
         local HOST TQ
         HOST=$(resolve_peer "$MAC")
-        TQ=$(batctl neighbors 2>/dev/null | awk -v mac="$MAC" '$2==mac {print $4; exit}')
+        TQ=$(peer_tq "$MAC")
         if [[ "$i" -eq "$PEERS" ]]; then
             echo "  └── $HOST  (TQ:${TQ:--})"
         else
